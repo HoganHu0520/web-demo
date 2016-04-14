@@ -7,12 +7,12 @@ define(['./app'], function (app) {
     'use strict';
     return app.config(['$routeProvider', function ($routeProvider) {
         $routeProvider.when('/view1', {
-            templateUrl: ajaxInfo.template_directory + 'partials/partial1.html',
+            templateUrl: ajaxInfo.template_directory + 'build/tpl/partial1.html',
             controller: 'MyCtrl1'
         });
 
         $routeProvider.when('/view2', {
-            templateUrl: ajaxInfo.template_directory + 'partials/partial2.html',
+            templateUrl: ajaxInfo.template_directory + 'build/tpl/partial2.html',
             controller: 'MyCtrl2'
         });
 

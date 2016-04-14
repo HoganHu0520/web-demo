@@ -1,5 +1,5 @@
 {
-  "name": "angularjs-requirejs-2",
+  "name": "angularjs-requirejs-wordpress",
   "version": "1.0.0",
   "description": "See [Angular + Require](/blog/angularjs-requirejs/) post on [StarterSquad blog](/blog/).",
   "main": " ",
@@ -11,8 +11,11 @@
   "devDependencies": {
     "amd-optimize": "^0.6.1",
     "gulp": "^3.9.1",
+    "gulp-clean": "^0.3.2",
     "gulp-concat": "^2.6.0",
+    "gulp-rename": "^1.2.2",
     "gulp-requirejs": "^0.1.3",
-    "gulp-requirejs-optimize": "^0.3.2"
+    "gulp-requirejs-optimize": "^0.3.2",
+    "gulp-zip": "^3.2.0"
   }
 }

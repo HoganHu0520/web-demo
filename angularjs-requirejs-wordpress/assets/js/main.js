@@ -6,9 +6,9 @@
 require.config({
 
     paths: {
-        'angular': '../lib/angular/angular',
-        'angular-route': '../lib/angular-route/angular-route',
-        'domReady': '../lib/requirejs-domready/domReady'
+        'angular': '../../lib/angular/angular',
+        'angular-route': '../../lib/angular-route/angular-route',
+        'domReady': '../../lib/requirejs-domready/domReady'
     },
 
     /**

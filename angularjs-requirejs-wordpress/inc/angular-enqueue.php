@@ -13,7 +13,7 @@ class angular_enqueue {
 
 		wp_enqueue_script( 'require', get_template_directory_uri().'/lib/requirejs/require.js', array( 'jquery' ), null, false );
 
-		wp_enqueue_script( 'app', get_template_directory_uri().'/dist/bootstrap.js', array( 'require' ), null, false );
+		wp_enqueue_script( 'app', get_template_directory_uri().'/build/js/scripts.js', array( 'require' ), null, false );
 
 		wp_localize_script( 'require', 'ajaxInfo',
 			array(
@@ -30,7 +30,7 @@ class angular_enqueue {
 
 	function angular_styles() {
 
-		wp_enqueue_style( 'angularStyles', get_template_directory_uri().'/css/app.css', array(), null, 'all' );
+		wp_enqueue_style( 'angularStyles', get_template_directory_uri().'/build/css/app.css', array(), null, 'all' );
 
 	}
 
