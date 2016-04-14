@@ -3,7 +3,6 @@
 <head>
   <meta charset="utf-8">
   <title>My AngularJS AngularJS + RequireJS App</title>
-  <link rel="stylesheet" href="css/app.css">
   <?php wp_head(); ?>
 </head>
 <body>

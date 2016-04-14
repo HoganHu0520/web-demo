@@ -1,40 +1,28 @@
 define('angular', [], function () {
-    (function (window, document, undefined) {
+    (function (window) {
         'use strict';
-        function minErr(module) {
+        function minErr(module, ErrorConstructor) {
+            ErrorConstructor = ErrorConstructor || Error;
             return function () {
-                var code = arguments[0], prefix = '[' + (module ? module + ':' : '') + code + '] ', template = arguments[1], templateArgs = arguments, stringify = function (obj) {
-                        if (typeof obj === 'function') {
-                            return obj.toString().replace(/ \{[\s\S]*$/, '');
-                        } else if (typeof obj === 'undefined') {
-                            return 'undefined';
-                        } else if (typeof obj !== 'string') {
-                            return JSON.stringify(obj);
-                        }
-                        return obj;
-                    }, message, i;
-                message = prefix + template.replace(/\{\d+\}/g, function (match) {
-                    var index = +match.slice(1, -1), arg;
-                    if (index + 2 < templateArgs.length) {
-                        arg = templateArgs[index + 2];
-                        if (typeof arg === 'function') {
-                            return arg.toString().replace(/ ?\{[\s\S]*$/, '');
-                        } else if (typeof arg === 'undefined') {
-                            return 'undefined';
-                        } else if (typeof arg !== 'string') {
-                            return toJson(arg);
-                        }
-                        return arg;
+                var SKIP_INDEXES = 2;
+                var templateArgs = arguments, code = templateArgs[0], message = '[' + (module ? module + ':' : '') + code + '] ', template = templateArgs[1], paramPrefix, i;
+                message += template.replace(/\{\d+\}/g, function (match) {
+                    var index = +match.slice(1, -1), shiftedIndex = index + SKIP_INDEXES;
+                    if (shiftedIndex < templateArgs.length) {
+                        return toDebugString(templateArgs[shiftedIndex]);
                     }
                     return match;
                 });
-                message = message + '\nhttp://errors.angularjs.org/1.2.3/' + (module ? module + '/' : '') + code;
-                for (i = 2; i < arguments.length; i++) {
-                    message = message + (i == 2 ? '?' : '&') + 'p' + (i - 2) + '=' + encodeURIComponent(stringify(arguments[i]));
+                message += '\nhttp://errors.angularjs.org/1.5.4/' + (module ? module + '/' : '') + code;
+                for (i = SKIP_INDEXES, paramPrefix = '?'; i < templateArgs.length; i++, paramPrefix = '&') {
+                    message += paramPrefix + 'p' + (i - SKIP_INDEXES) + '=' + encodeURIComponent(toDebugString(templateArgs[i]));
                 }
-                return new Error(message);
+                return new ErrorConstructor(message);
             };
         }
+        var REGEX_STRING_REGEXP = /^\/(.+)\/([a-z]*)$/;
+        var VALIDITY_STATE_PROPERTY = 'validity';
+        var hasOwnProperty = Object.prototype.hasOwnProperty;
         var lowercase = function (string) {
             return isString(string) ? string.toLowerCase() : string;
         };
@@ -55,60 +43,56 @@ define('angular', [], function () {
             lowercase = manualLowercase;
             uppercase = manualUppercase;
         }
-        var msie, jqLite, jQuery, slice = [].slice, push = [].push, toString = Object.prototype.toString, ngMinErr = minErr('ng'), _angular = window.angular, angular = window.angular || (window.angular = {}), angularModule, nodeName_, uid = [
-                '0',
-                '0',
-                '0'
-            ];
-        msie = int((/msie (\d+)/.exec(lowercase(navigator.userAgent)) || [])[1]);
-        if (isNaN(msie)) {
-            msie = int((/trident\/.*; rv:(\d+)/.exec(lowercase(navigator.userAgent)) || [])[1]);
-        }
+        var msie, jqLite, jQuery, slice = [].slice, splice = [].splice, push = [].push, toString = Object.prototype.toString, getPrototypeOf = Object.getPrototypeOf, ngMinErr = minErr('ng'), angular = window.angular || (window.angular = {}), angularModule, uid = 0;
+        msie = window.document.documentMode;
         function isArrayLike(obj) {
-            if (obj == null || isWindow(obj)) {
+            if (obj == null || isWindow(obj))
                 return false;
-            }
-            var length = obj.length;
-            if (obj.nodeType === 1 && length) {
+            if (isArray(obj) || isString(obj) || jqLite && obj instanceof jqLite)
                 return true;
-            }
-            return isString(obj) || isArray(obj) || length === 0 || typeof length === 'number' && length > 0 && length - 1 in obj;
+            var length = 'length' in Object(obj) && obj.length;
+            return isNumber(length) && (length >= 0 && (length - 1 in obj || obj instanceof Array) || typeof obj.item == 'function');
         }
         function forEach(obj, iterator, context) {
-            var key;
+            var key, length;
             if (obj) {
                 if (isFunction(obj)) {
                     for (key in obj) {
-                        if (key != 'prototype' && key != 'length' && key != 'name' && obj.hasOwnProperty(key)) {
-                            iterator.call(context, obj[key], key);
+                        if (key != 'prototype' && key != 'length' && key != 'name' && (!obj.hasOwnProperty || obj.hasOwnProperty(key))) {
+                            iterator.call(context, obj[key], key, obj);
+                        }
+                    }
+                } else if (isArray(obj) || isArrayLike(obj)) {
+                    var isPrimitive = typeof obj !== 'object';
+                    for (key = 0, length = obj.length; key < length; key++) {
+                        if (isPrimitive || key in obj) {
+                            iterator.call(context, obj[key], key, obj);
                         }
                     }
                 } else if (obj.forEach && obj.forEach !== forEach) {
-                    obj.forEach(iterator, context);
-                } else if (isArrayLike(obj)) {
-                    for (key = 0; key < obj.length; key++)
-                        iterator.call(context, obj[key], key);
-                } else {
+                    obj.forEach(iterator, context, obj);
+                } else if (isBlankObject(obj)) {
+                    for (key in obj) {
+                        iterator.call(context, obj[key], key, obj);
+                    }
+                } else if (typeof obj.hasOwnProperty === 'function') {
                     for (key in obj) {
                         if (obj.hasOwnProperty(key)) {
-                            iterator.call(context, obj[key], key);
+                            iterator.call(context, obj[key], key, obj);
+                        }
+                    }
+                } else {
+                    for (key in obj) {
+                        if (hasOwnProperty.call(obj, key)) {
+                            iterator.call(context, obj[key], key, obj);
                         }
                     }
                 }
             }
             return obj;
         }
-        function sortedKeys(obj) {
-            var keys = [];
-            for (var key in obj) {
-                if (obj.hasOwnProperty(key)) {
-                    keys.push(key);
-                }
-            }
-            return keys.sort();
-        }
         function forEachSorted(obj, iterator, context) {
-            var keys = sortedKeys(obj);
+            var keys = Object.keys(obj).sort();
             for (var i = 0; i < keys.length; i++) {
                 iterator.call(context, obj[keys[i]], keys[i]);
             }
@@ -120,24 +104,7 @@ define('angular', [], function () {
             };
         }
         function nextUid() {
-            var index = uid.length;
-            var digit;
-            while (index) {
-                index--;
-                digit = uid[index].charCodeAt(0);
-                if (digit == 57) {
-                    uid[index] = 'A';
-                    return uid.join('');
-                }
-                if (digit == 90) {
-                    uid[index] = '0';
-                } else {
-                    uid[index] = String.fromCharCode(digit + 1);
-                    return uid.join('');
-                }
-            }
-            uid.unshift('0');
-            return uid.join('');
+            return ++uid;
         }
         function setHashKey(obj, h) {
             if (h) {
@@ -146,24 +113,49 @@ define('angular', [], function () {
                 delete obj.$$hashKey;
             }
         }
-        function extend(dst) {
+        function baseExtend(dst, objs, deep) {
             var h = dst.$$hashKey;
-            forEach(arguments, function (obj) {
-                if (obj !== dst) {
-                    forEach(obj, function (value, key) {
-                        dst[key] = value;
-                    });
+            for (var i = 0, ii = objs.length; i < ii; ++i) {
+                var obj = objs[i];
+                if (!isObject(obj) && !isFunction(obj))
+                    continue;
+                var keys = Object.keys(obj);
+                for (var j = 0, jj = keys.length; j < jj; j++) {
+                    var key = keys[j];
+                    var src = obj[key];
+                    if (deep && isObject(src)) {
+                        if (isDate(src)) {
+                            dst[key] = new Date(src.valueOf());
+                        } else if (isRegExp(src)) {
+                            dst[key] = new RegExp(src);
+                        } else if (src.nodeName) {
+                            dst[key] = src.cloneNode(true);
+                        } else if (isElement(src)) {
+                            dst[key] = src.clone();
+                        } else {
+                            if (!isObject(dst[key]))
+                                dst[key] = isArray(src) ? [] : {};
+                            baseExtend(dst[key], [src], true);
+                        }
+                    } else {
+                        dst[key] = src;
+                    }
                 }
-            });
+            }
             setHashKey(dst, h);
             return dst;
         }
-        function int(str) {
+        function extend(dst) {
+            return baseExtend(dst, slice.call(arguments, 1), false);
+        }
+        function merge(dst) {
+            return baseExtend(dst, slice.call(arguments, 1), true);
+        }
+        function toInt(str) {
             return parseInt(str, 10);
         }
         function inherit(parent, extra) {
-            return extend(new (extend(function () {
-            }, { prototype: parent }))(), extra);
+            return extend(Object.create(parent), extra);
         }
         function noop() {
         }
@@ -173,171 +165,221 @@ define('angular', [], function () {
         }
         identity.$inject = [];
         function valueFn(value) {
-            return function () {
+            return function valueRef() {
                 return value;
             };
         }
+        function hasCustomToString(obj) {
+            return isFunction(obj.toString) && obj.toString !== toString;
+        }
         function isUndefined(value) {
-            return typeof value == 'undefined';
+            return typeof value === 'undefined';
         }
         function isDefined(value) {
-            return typeof value != 'undefined';
+            return typeof value !== 'undefined';
         }
         function isObject(value) {
-            return value != null && typeof value == 'object';
+            return value !== null && typeof value === 'object';
+        }
+        function isBlankObject(value) {
+            return value !== null && typeof value === 'object' && !getPrototypeOf(value);
         }
         function isString(value) {
-            return typeof value == 'string';
+            return typeof value === 'string';
         }
         function isNumber(value) {
-            return typeof value == 'number';
+            return typeof value === 'number';
         }
         function isDate(value) {
-            return toString.apply(value) == '[object Date]';
+            return toString.call(value) === '[object Date]';
         }
-        function isArray(value) {
-            return toString.apply(value) == '[object Array]';
-        }
+        var isArray = Array.isArray;
         function isFunction(value) {
-            return typeof value == 'function';
+            return typeof value === 'function';
         }
         function isRegExp(value) {
-            return toString.apply(value) == '[object RegExp]';
+            return toString.call(value) === '[object RegExp]';
         }
         function isWindow(obj) {
-            return obj && obj.document && obj.location && obj.alert && obj.setInterval;
+            return obj && obj.window === obj;
         }
         function isScope(obj) {
             return obj && obj.$evalAsync && obj.$watch;
         }
         function isFile(obj) {
-            return toString.apply(obj) === '[object File]';
+            return toString.call(obj) === '[object File]';
+        }
+        function isFormData(obj) {
+            return toString.call(obj) === '[object FormData]';
+        }
+        function isBlob(obj) {
+            return toString.call(obj) === '[object Blob]';
         }
         function isBoolean(value) {
-            return typeof value == 'boolean';
+            return typeof value === 'boolean';
         }
-        var trim = function () {
-            if (!String.prototype.trim) {
-                return function (value) {
-                    return isString(value) ? value.replace(/^\s\s*/, '').replace(/\s\s*$/, '') : value;
-                };
-            }
-            return function (value) {
-                return isString(value) ? value.trim() : value;
-            };
-        }();
+        function isPromiseLike(obj) {
+            return obj && isFunction(obj.then);
+        }
+        var TYPED_ARRAY_REGEXP = /^\[object (?:Uint8|Uint8Clamped|Uint16|Uint32|Int8|Int16|Int32|Float32|Float64)Array\]$/;
+        function isTypedArray(value) {
+            return value && isNumber(value.length) && TYPED_ARRAY_REGEXP.test(toString.call(value));
+        }
+        function isArrayBuffer(obj) {
+            return toString.call(obj) === '[object ArrayBuffer]';
+        }
+        var trim = function (value) {
+            return isString(value) ? value.trim() : value;
+        };
+        var escapeForRegexp = function (s) {
+            return s.replace(/([-()\[\]{}+?*.$\^|,:#<!\\])/g, '\\$1').replace(/\x08/g, '\\x08');
+        };
         function isElement(node) {
-            return node && (node.nodeName || node.on && node.find);
+            return !!(node && (node.nodeName || node.prop && node.attr && node.find));
         }
         function makeMap(str) {
             var obj = {}, items = str.split(','), i;
-            for (i = 0; i < items.length; i++)
+            for (i = 0; i < items.length; i++) {
                 obj[items[i]] = true;
+            }
             return obj;
         }
-        if (msie < 9) {
-            nodeName_ = function (element) {
-                element = element.nodeName ? element : element[0];
-                return element.scopeName && element.scopeName != 'HTML' ? uppercase(element.scopeName + ':' + element.nodeName) : element.nodeName;
-            };
-        } else {
-            nodeName_ = function (element) {
-                return element.nodeName ? element.nodeName : element[0].nodeName;
-            };
-        }
-        function map(obj, iterator, context) {
-            var results = [];
-            forEach(obj, function (value, index, list) {
-                results.push(iterator.call(context, value, index, list));
-            });
-            return results;
-        }
-        function size(obj, ownPropsOnly) {
-            var count = 0, key;
-            if (isArray(obj) || isString(obj)) {
-                return obj.length;
-            } else if (isObject(obj)) {
-                for (key in obj)
-                    if (!ownPropsOnly || obj.hasOwnProperty(key))
-                        count++;
-            }
-            return count;
+        function nodeName_(element) {
+            return lowercase(element.nodeName || element[0] && element[0].nodeName);
         }
         function includes(array, obj) {
-            return indexOf(array, obj) != -1;
-        }
-        function indexOf(array, obj) {
-            if (array.indexOf)
-                return array.indexOf(obj);
-            for (var i = 0; i < array.length; i++) {
-                if (obj === array[i])
-                    return i;
-            }
-            return -1;
+            return Array.prototype.indexOf.call(array, obj) != -1;
         }
         function arrayRemove(array, value) {
-            var index = indexOf(array, value);
-            if (index >= 0)
+            var index = array.indexOf(value);
+            if (index >= 0) {
                 array.splice(index, 1);
-            return value;
-        }
-        function isLeafNode(node) {
-            if (node) {
-                switch (node.nodeName) {
-                case 'OPTION':
-                case 'PRE':
-                case 'TITLE':
-                    return true;
-                }
             }
-            return false;
+            return index;
         }
         function copy(source, destination) {
-            if (isWindow(source) || isScope(source)) {
-                throw ngMinErr('cpws', 'Can\'t copy! Making copies of Window or Scope instances is not supported.');
-            }
-            if (!destination) {
-                destination = source;
-                if (source) {
-                    if (isArray(source)) {
-                        destination = copy(source, []);
-                    } else if (isDate(source)) {
-                        destination = new Date(source.getTime());
-                    } else if (isRegExp(source)) {
-                        destination = new RegExp(source.source);
-                    } else if (isObject(source)) {
-                        destination = copy(source, {});
-                    }
+            var stackSource = [];
+            var stackDest = [];
+            if (destination) {
+                if (isTypedArray(destination) || isArrayBuffer(destination)) {
+                    throw ngMinErr('cpta', 'Can\'t copy! TypedArray destination cannot be mutated.');
                 }
-            } else {
-                if (source === destination)
+                if (source === destination) {
                     throw ngMinErr('cpi', 'Can\'t copy! Source and destination are identical.');
-                if (isArray(source)) {
+                }
+                if (isArray(destination)) {
                     destination.length = 0;
-                    for (var i = 0; i < source.length; i++) {
-                        destination.push(copy(source[i]));
+                } else {
+                    forEach(destination, function (value, key) {
+                        if (key !== '$$hashKey') {
+                            delete destination[key];
+                        }
+                    });
+                }
+                stackSource.push(source);
+                stackDest.push(destination);
+                return copyRecurse(source, destination);
+            }
+            return copyElement(source);
+            function copyRecurse(source, destination) {
+                var h = destination.$$hashKey;
+                var key;
+                if (isArray(source)) {
+                    for (var i = 0, ii = source.length; i < ii; i++) {
+                        destination.push(copyElement(source[i]));
+                    }
+                } else if (isBlankObject(source)) {
+                    for (key in source) {
+                        destination[key] = copyElement(source[key]);
+                    }
+                } else if (source && typeof source.hasOwnProperty === 'function') {
+                    for (key in source) {
+                        if (source.hasOwnProperty(key)) {
+                            destination[key] = copyElement(source[key]);
+                        }
                     }
                 } else {
-                    var h = destination.$$hashKey;
-                    forEach(destination, function (value, key) {
-                        delete destination[key];
-                    });
-                    for (var key in source) {
-                        destination[key] = copy(source[key]);
+                    for (key in source) {
+                        if (hasOwnProperty.call(source, key)) {
+                            destination[key] = copyElement(source[key]);
+                        }
                     }
-                    setHashKey(destination, h);
+                }
+                setHashKey(destination, h);
+                return destination;
+            }
+            function copyElement(source) {
+                if (!isObject(source)) {
+                    return source;
+                }
+                var index = stackSource.indexOf(source);
+                if (index !== -1) {
+                    return stackDest[index];
+                }
+                if (isWindow(source) || isScope(source)) {
+                    throw ngMinErr('cpws', 'Can\'t copy! Making copies of Window or Scope instances is not supported.');
+                }
+                var needsRecurse = false;
+                var destination = copyType(source);
+                if (destination === undefined) {
+                    destination = isArray(source) ? [] : Object.create(getPrototypeOf(source));
+                    needsRecurse = true;
+                }
+                stackSource.push(source);
+                stackDest.push(destination);
+                return needsRecurse ? copyRecurse(source, destination) : destination;
+            }
+            function copyType(source) {
+                switch (toString.call(source)) {
+                case '[object Int8Array]':
+                case '[object Int16Array]':
+                case '[object Int32Array]':
+                case '[object Float32Array]':
+                case '[object Float64Array]':
+                case '[object Uint8Array]':
+                case '[object Uint8ClampedArray]':
+                case '[object Uint16Array]':
+                case '[object Uint32Array]':
+                    return new source.constructor(copyElement(source.buffer));
+                case '[object ArrayBuffer]':
+                    if (!source.slice) {
+                        var copied = new ArrayBuffer(source.byteLength);
+                        new Uint8Array(copied).set(new Uint8Array(source));
+                        return copied;
+                    }
+                    return source.slice(0);
+                case '[object Boolean]':
+                case '[object Number]':
+                case '[object String]':
+                case '[object Date]':
+                    return new source.constructor(source.valueOf());
+                case '[object RegExp]':
+                    var re = new RegExp(source.source, source.toString().match(/[^\/]*$/)[0]);
+                    re.lastIndex = source.lastIndex;
+                    return re;
+                case '[object Blob]':
+                    return new source.constructor([source], { type: source.type });
+                }
+                if (isFunction(source.cloneNode)) {
+                    return source.cloneNode(true);
                 }
             }
-            return destination;
         }
         function shallowCopy(src, dst) {
-            dst = dst || {};
-            for (var key in src) {
-                if (src.hasOwnProperty(key) && key.substr(0, 2) !== '$$') {
-                    dst[key] = src[key];
+            if (isArray(src)) {
+                dst = dst || [];
+                for (var i = 0, ii = src.length; i < ii; i++) {
+                    dst[i] = src[i];
+                }
+            } else if (isObject(src)) {
+                dst = dst || {};
+                for (var key in src) {
+                    if (!(key.charAt(0) === '$' && key.charAt(1) === '$')) {
+                        dst[key] = src[key];
+                    }
                 }
             }
-            return dst;
+            return dst || src;
         }
         function equals(o1, o2) {
             if (o1 === o2)
@@ -347,46 +389,85 @@ define('angular', [], function () {
             if (o1 !== o1 && o2 !== o2)
                 return true;
             var t1 = typeof o1, t2 = typeof o2, length, key, keySet;
-            if (t1 == t2) {
-                if (t1 == 'object') {
-                    if (isArray(o1)) {
-                        if (!isArray(o2))
-                            return false;
-                        if ((length = o1.length) == o2.length) {
-                            for (key = 0; key < length; key++) {
-                                if (!equals(o1[key], o2[key]))
-                                    return false;
-                            }
-                            return true;
-                        }
-                    } else if (isDate(o1)) {
-                        return isDate(o2) && o1.getTime() == o2.getTime();
-                    } else if (isRegExp(o1) && isRegExp(o2)) {
-                        return o1.toString() == o2.toString();
-                    } else {
-                        if (isScope(o1) || isScope(o2) || isWindow(o1) || isWindow(o2) || isArray(o2))
-                            return false;
-                        keySet = {};
-                        for (key in o1) {
-                            if (key.charAt(0) === '$' || isFunction(o1[key]))
-                                continue;
+            if (t1 == t2 && t1 == 'object') {
+                if (isArray(o1)) {
+                    if (!isArray(o2))
+                        return false;
+                    if ((length = o1.length) == o2.length) {
+                        for (key = 0; key < length; key++) {
                             if (!equals(o1[key], o2[key]))
-                                return false;
-                            keySet[key] = true;
-                        }
-                        for (key in o2) {
-                            if (!keySet.hasOwnProperty(key) && key.charAt(0) !== '$' && o2[key] !== undefined && !isFunction(o2[key]))
                                 return false;
                         }
                         return true;
                     }
+                } else if (isDate(o1)) {
+                    if (!isDate(o2))
+                        return false;
+                    return equals(o1.getTime(), o2.getTime());
+                } else if (isRegExp(o1)) {
+                    if (!isRegExp(o2))
+                        return false;
+                    return o1.toString() == o2.toString();
+                } else {
+                    if (isScope(o1) || isScope(o2) || isWindow(o1) || isWindow(o2) || isArray(o2) || isDate(o2) || isRegExp(o2))
+                        return false;
+                    keySet = createMap();
+                    for (key in o1) {
+                        if (key.charAt(0) === '$' || isFunction(o1[key]))
+                            continue;
+                        if (!equals(o1[key], o2[key]))
+                            return false;
+                        keySet[key] = true;
+                    }
+                    for (key in o2) {
+                        if (!(key in keySet) && key.charAt(0) !== '$' && isDefined(o2[key]) && !isFunction(o2[key]))
+                            return false;
+                    }
+                    return true;
                 }
             }
             return false;
         }
-        function csp() {
-            return document.securityPolicy && document.securityPolicy.isActive || document.querySelector && !!(document.querySelector('[ng-csp]') || document.querySelector('[data-ng-csp]'));
-        }
+        var csp = function () {
+            if (!isDefined(csp.rules)) {
+                var ngCspElement = window.document.querySelector('[ng-csp]') || window.document.querySelector('[data-ng-csp]');
+                if (ngCspElement) {
+                    var ngCspAttribute = ngCspElement.getAttribute('ng-csp') || ngCspElement.getAttribute('data-ng-csp');
+                    csp.rules = {
+                        noUnsafeEval: !ngCspAttribute || ngCspAttribute.indexOf('no-unsafe-eval') !== -1,
+                        noInlineStyle: !ngCspAttribute || ngCspAttribute.indexOf('no-inline-style') !== -1
+                    };
+                } else {
+                    csp.rules = {
+                        noUnsafeEval: noUnsafeEval(),
+                        noInlineStyle: false
+                    };
+                }
+            }
+            return csp.rules;
+            function noUnsafeEval() {
+                try {
+                    new Function('');
+                    return false;
+                } catch (e) {
+                    return true;
+                }
+            }
+        };
+        var jq = function () {
+            if (isDefined(jq.name_))
+                return jq.name_;
+            var el;
+            var i, ii = ngAttrPrefixes.length, prefix, name;
+            for (i = 0; i < ii; ++i) {
+                prefix = ngAttrPrefixes[i];
+                if (el = window.document.querySelector('[' + prefix.replace(':', '\\:') + 'jq]')) {
+                    name = el.getAttribute(prefix + 'jq');
+                    break;
+                }
+            }
+            return jq.name_ = name;
+        };
         function concat(array1, array2, index) {
             return array1.concat(slice.call(array2, index));
         }
@@ -397,7 +478,7 @@ define('angular', [], function () {
             var curryArgs = arguments.length > 2 ? sliceArgs(arguments, 2) : [];
             if (isFunction(fn) && !(fn instanceof RegExp)) {
                 return curryArgs.length ? function () {
-                    return arguments.length ? fn.apply(self, curryArgs.concat(slice.call(arguments, 0))) : fn.apply(self, curryArgs);
+                    return arguments.length ? fn.apply(self, concat(curryArgs, arguments, 0)) : fn.apply(self, curryArgs);
                 } : function () {
                     return arguments.length ? fn.apply(self, arguments) : fn.call(self);
                 };
@@ -407,11 +488,11 @@ define('angular', [], function () {
         }
         function toJsonReplacer(key, value) {
             var val = value;
-            if (typeof key === 'string' && key.charAt(0) === '$') {
+            if (typeof key === 'string' && key.charAt(0) === '$' && key.charAt(1) === '$') {
                 val = undefined;
             } else if (isWindow(value)) {
                 val = '$WINDOW';
-            } else if (value && document === value) {
+            } else if (value && window.document === value) {
                 val = '$DOCUMENT';
             } else if (isScope(value)) {
                 val = '$SCOPE';
@@ -419,32 +500,42 @@ define('angular', [], function () {
             return val;
         }
         function toJson(obj, pretty) {
-            if (typeof obj === 'undefined')
+            if (isUndefined(obj))
                 return undefined;
-            return JSON.stringify(obj, toJsonReplacer, pretty ? '  ' : null);
+            if (!isNumber(pretty)) {
+                pretty = pretty ? 2 : null;
+            }
+            return JSON.stringify(obj, toJsonReplacer, pretty);
         }
         function fromJson(json) {
             return isString(json) ? JSON.parse(json) : json;
         }
-        function toBoolean(value) {
-            if (value && value.length !== 0) {
-                var v = lowercase('' + value);
-                value = !(v == 'f' || v == '0' || v == 'false' || v == 'no' || v == 'n' || v == '[]');
-            } else {
-                value = false;
-            }
-            return value;
+        var ALL_COLONS = /:/g;
+        function timezoneToOffset(timezone, fallback) {
+            timezone = timezone.replace(ALL_COLONS, '');
+            var requestedTimezoneOffset = Date.parse('Jan 01, 1970 00:00:00 ' + timezone) / 60000;
+            return isNaN(requestedTimezoneOffset) ? fallback : requestedTimezoneOffset;
+        }
+        function addDateMinutes(date, minutes) {
+            date = new Date(date.getTime());
+            date.setMinutes(date.getMinutes() + minutes);
+            return date;
+        }
+        function convertTimezoneToLocal(date, timezone, reverse) {
+            reverse = reverse ? -1 : 1;
+            var dateTimezoneOffset = date.getTimezoneOffset();
+            var timezoneOffset = timezoneToOffset(timezone, dateTimezoneOffset);
+            return addDateMinutes(date, reverse * (timezoneOffset - dateTimezoneOffset));
         }
         function startingTag(element) {
             element = jqLite(element).clone();
             try {
-                element.html('');
+                element.empty();
             } catch (e) {
             }
-            var TEXT_NODE = 3;
             var elemHtml = jqLite('<div>').append(element).html();
             try {
-                return element[0].nodeType === TEXT_NODE ? lowercase(elemHtml) : elemHtml.match(/^(<[^>]+>)/)[1].replace(/^<([\w\-]+)/, function (match, nodeName) {
+                return element[0].nodeType === NODE_TYPE_TEXT ? lowercase(elemHtml) : elemHtml.match(/^(<[^>]+>)/)[1].replace(/^<([\w\-]+)/, function (match, nodeName) {
                     return '<' + lowercase(nodeName);
                 });
             } catch (e) {
@@ -458,14 +549,20 @@ define('angular', [], function () {
             }
         }
         function parseKeyValue(keyValue) {
-            var obj = {}, key_value, key;
+            var obj = {};
             forEach((keyValue || '').split('&'), function (keyValue) {
+                var splitPoint, key, val;
                 if (keyValue) {
-                    key_value = keyValue.split('=');
-                    key = tryDecodeURIComponent(key_value[0]);
+                    key = keyValue = keyValue.replace(/\+/g, '%20');
+                    splitPoint = keyValue.indexOf('=');
+                    if (splitPoint !== -1) {
+                        key = keyValue.substring(0, splitPoint);
+                        val = keyValue.substring(splitPoint + 1);
+                    }
+                    key = tryDecodeURIComponent(key);
                     if (isDefined(key)) {
-                        var val = isDefined(key_value[1]) ? tryDecodeURIComponent(key_value[1]) : true;
-                        if (!obj[key]) {
+                        val = isDefined(val) ? tryDecodeURIComponent(val) : true;
+                        if (!hasOwnProperty.call(obj, key)) {
                             obj[key] = val;
                         } else if (isArray(obj[key])) {
                             obj[key].push(val);
@@ -497,55 +594,56 @@ define('angular', [], function () {
             return encodeUriQuery(val, true).replace(/%26/gi, '&').replace(/%3D/gi, '=').replace(/%2B/gi, '+');
         }
         function encodeUriQuery(val, pctEncodeSpaces) {
-            return encodeURIComponent(val).replace(/%40/gi, '@').replace(/%3A/gi, ':').replace(/%24/g, '$').replace(/%2C/gi, ',').replace(/%20/g, pctEncodeSpaces ? '%20' : '+');
+            return encodeURIComponent(val).replace(/%40/gi, '@').replace(/%3A/gi, ':').replace(/%24/g, '$').replace(/%2C/gi, ',').replace(/%3B/gi, ';').replace(/%20/g, pctEncodeSpaces ? '%20' : '+');
+        }
+        var ngAttrPrefixes = [
+            'ng-',
+            'data-ng-',
+            'ng:',
+            'x-ng-'
+        ];
+        function getNgAttribute(element, ngAttr) {
+            var attr, i, ii = ngAttrPrefixes.length;
+            for (i = 0; i < ii; ++i) {
+                attr = ngAttrPrefixes[i] + ngAttr;
+                if (isString(attr = element.getAttribute(attr))) {
+                    return attr;
+                }
+            }
+            return null;
         }
         function angularInit(element, bootstrap) {
-            var elements = [element], appElement, module, names = [
-                    'ng:app',
-                    'ng-app',
-                    'x-ng-app',
-                    'data-ng-app'
-                ], NG_APP_CLASS_REGEXP = /\sng[:\-]app(:\s*([\w\d_]+);?)?\s/;
-            function append(element) {
-                element && elements.push(element);
-            }
-            forEach(names, function (name) {
-                names[name] = true;
-                append(document.getElementById(name));
-                name = name.replace(':', '\\:');
-                if (element.querySelectorAll) {
-                    forEach(element.querySelectorAll('.' + name), append);
-                    forEach(element.querySelectorAll('.' + name + '\\:'), append);
-                    forEach(element.querySelectorAll('[' + name + ']'), append);
+            var appElement, module, config = {};
+            forEach(ngAttrPrefixes, function (prefix) {
+                var name = prefix + 'app';
+                if (!appElement && element.hasAttribute && element.hasAttribute(name)) {
+                    appElement = element;
+                    module = element.getAttribute(name);
                 }
             });
-            forEach(elements, function (element) {
-                if (!appElement) {
-                    var className = ' ' + element.className + ' ';
-                    var match = NG_APP_CLASS_REGEXP.exec(className);
-                    if (match) {
-                        appElement = element;
-                        module = (match[2] || '').replace(/\s+/g, ',');
-                    } else {
-                        forEach(element.attributes, function (attr) {
-                            if (!appElement && names[attr.name]) {
-                                appElement = element;
-                                module = attr.value;
-                            }
-                        });
-                    }
+            forEach(ngAttrPrefixes, function (prefix) {
+                var name = prefix + 'app';
+                var candidate;
+                if (!appElement && (candidate = element.querySelector('[' + name.replace(':', '\\:') + ']'))) {
+                    appElement = candidate;
+                    module = candidate.getAttribute(name);
                 }
             });
             if (appElement) {
-                bootstrap(appElement, module ? [module] : []);
+                config.strictDi = getNgAttribute(appElement, 'strict-di') !== null;
+                bootstrap(appElement, module ? [module] : [], config);
             }
         }
-        function bootstrap(element, modules) {
+        function bootstrap(element, modules, config) {
+            if (!isObject(config))
+                config = {};
+            var defaultConfig = { strictDi: false };
+            config = extend(defaultConfig, config);
             var doBootstrap = function () {
                 element = jqLite(element);
                 if (element.injector()) {
-                    var tag = element[0] === document ? 'document' : startingTag(element);
-                    throw ngMinErr('btstrpd', 'App Already Bootstrapped with this Element \'{0}\'', tag);
+                    var tag = element[0] === window.document ? 'document' : startingTag(element);
+                    throw ngMinErr('btstrpd', 'App already bootstrapped with this element \'{0}\'', tag.replace(/</, '&lt;').replace(/>/, '&gt;'));
                 }
                 modules = modules || [];
                 modules.unshift([
@@ -554,15 +652,22 @@ define('angular', [], function () {
                         $provide.value('$rootElement', element);
                     }
                 ]);
+                if (config.debugInfoEnabled) {
+                    modules.push([
+                        '$compileProvider',
+                        function ($compileProvider) {
+                            $compileProvider.debugInfoEnabled(true);
+                        }
+                    ]);
+                }
                 modules.unshift('ng');
-                var injector = createInjector(modules);
+                var injector = createInjector(modules, config.strictDi);
                 injector.invoke([
                     '$rootScope',
                     '$rootElement',
                     '$compile',
                     '$injector',
-                    '$animate',
-                    function (scope, element, compile, injector, animate) {
+                    function bootstrapApply(scope, element, compile, injector) {
                         scope.$apply(function () {
                             element.data('$injector', injector);
                             compile(element)(scope);
@@ -571,7 +676,12 @@ define('angular', [], function () {
                 ]);
                 return injector;
             };
+            var NG_ENABLE_DEBUG_INFO = /^NG_ENABLE_DEBUG_INFO!/;
             var NG_DEFER_BOOTSTRAP = /^NG_DEFER_BOOTSTRAP!/;
+            if (window && NG_ENABLE_DEBUG_INFO.test(window.name)) {
+                config.debugInfoEnabled = true;
+                window.name = window.name.replace(NG_ENABLE_DEBUG_INFO, '');
+            }
             if (window && !NG_DEFER_BOOTSTRAP.test(window.name)) {
                 return doBootstrap();
             }
@@ -580,8 +690,22 @@ define('angular', [], function () {
                 forEach(extraModules, function (module) {
                     modules.push(module);
                 });
-                doBootstrap();
+                return doBootstrap();
             };
+            if (isFunction(angular.resumeDeferredBootstrap)) {
+                angular.resumeDeferredBootstrap();
+            }
+        }
+        function reloadWithDebugInfo() {
+            window.name = 'NG_ENABLE_DEBUG_INFO!' + window.name;
+            window.location.reload();
+        }
+        function getTestability(rootElement) {
+            var injector = angular.element(rootElement).injector();
+            if (!injector) {
+                throw ngMinErr('test', 'no injector found for element argument to getTestability');
+            }
+            return injector.get('$$testability');
         }
         var SNAKE_CASE_REGEXP = /[A-Z]/g;
         function snake_case(name, separator) {
@@ -590,9 +714,15 @@ define('angular', [], function () {
                 return (pos ? separator : '') + letter.toLowerCase();
             });
         }
+        var bindJQueryFired = false;
         function bindJQuery() {
-            jQuery = window.jQuery;
-            if (jQuery) {
+            var originalCleanData;
+            if (bindJQueryFired) {
+                return;
+            }
+            var jqName = jq();
+            jQuery = isUndefined(jqName) ? window.jQuery : !jqName ? undefined : window[jqName];
+            if (jQuery && jQuery.fn.on) {
                 jqLite = jQuery;
                 extend(jQuery.fn, {
                     scope: JQLitePrototype.scope,
@@ -601,13 +731,22 @@ define('angular', [], function () {
                     injector: JQLitePrototype.injector,
                     inheritedData: JQLitePrototype.inheritedData
                 });
-                jqLitePatchJQueryRemove('remove', true, true, false);
-                jqLitePatchJQueryRemove('empty', false, false, false);
-                jqLitePatchJQueryRemove('html', false, false, true);
+                originalCleanData = jQuery.cleanData;
+                jQuery.cleanData = function (elems) {
+                    var events;
+                    for (var i = 0, elem; (elem = elems[i]) != null; i++) {
+                        events = jQuery._data(elem, 'events');
+                        if (events && events.$destroy) {
+                            jQuery(elem).triggerHandler('$destroy');
+                        }
+                    }
+                    originalCleanData(elems);
+                };
             } else {
                 jqLite = JQLite;
             }
             angular.element = jqLite;
+            bindJQueryFired = true;
         }
         function assertArg(arg, name, reason) {
             if (!arg) {
@@ -619,7 +758,7 @@ define('angular', [], function () {
             if (acceptArrayAnnotation && isArray(arg)) {
                 arg = arg[arg.length - 1];
             }
-            assertArg(isFunction(arg), name, 'not a function, got ' + (arg && typeof arg == 'object' ? arg.constructor.name || 'Object' : typeof arg));
+            assertArg(isFunction(arg), name, 'not a function, got ' + (arg && typeof arg === 'object' ? arg.constructor.name || 'Object' : typeof arg));
             return arg;
         }
         function assertNotHasOwnProperty(name, context) {
@@ -645,20 +784,29 @@ define('angular', [], function () {
             }
             return obj;
         }
-        function getBlockElements(block) {
-            if (block.startNode === block.endNode) {
-                return jqLite(block.startNode);
+        function getBlockNodes(nodes) {
+            var node = nodes[0];
+            var endNode = nodes[nodes.length - 1];
+            var blockNodes;
+            for (var i = 1; node !== endNode && (node = node.nextSibling); i++) {
+                if (blockNodes || nodes[i] !== node) {
+                    if (!blockNodes) {
+                        blockNodes = jqLite(slice.call(nodes, 0, i));
+                    }
+                    blockNodes.push(node);
+                }
             }
-            var element = block.startNode;
-            var elements = [element];
-            do {
-                element = element.nextSibling;
-                if (!element)
-                    break;
-                elements.push(element);
-            } while (element !== block.endNode);
-            return jqLite(elements);
+            return blockNodes || nodes;
         }
+        function createMap() {
+            return Object.create(null);
+        }
+        var NODE_TYPE_ELEMENT = 1;
+        var NODE_TYPE_ATTRIBUTE = 2;
+        var NODE_TYPE_TEXT = 3;
+        var NODE_TYPE_COMMENT = 8;
+        var NODE_TYPE_DOCUMENT = 9;
+        var NODE_TYPE_DOCUMENT_FRAGMENT = 11;
         function setupModuleLoader(window) {
             var $injectorMinErr = minErr('$injector');
             var ngMinErr = minErr('ng');
@@ -684,22 +832,26 @@ define('angular', [], function () {
                             throw $injectorMinErr('nomod', 'Module \'{0}\' is not available! You either misspelled ' + 'the module name or forgot to load it. If registering a module ensure that you ' + 'specify the dependencies as the second argument.', name);
                         }
                         var invokeQueue = [];
+                        var configBlocks = [];
                         var runBlocks = [];
-                        var config = invokeLater('$injector', 'invoke');
+                        var config = invokeLater('$injector', 'invoke', 'push', configBlocks);
                         var moduleInstance = {
                             _invokeQueue: invokeQueue,
+                            _configBlocks: configBlocks,
                             _runBlocks: runBlocks,
                             requires: requires,
                             name: name,
-                            provider: invokeLater('$provide', 'provider'),
-                            factory: invokeLater('$provide', 'factory'),
-                            service: invokeLater('$provide', 'service'),
+                            provider: invokeLaterAndSetModuleName('$provide', 'provider'),
+                            factory: invokeLaterAndSetModuleName('$provide', 'factory'),
+                            service: invokeLaterAndSetModuleName('$provide', 'service'),
                             value: invokeLater('$provide', 'value'),
                             constant: invokeLater('$provide', 'constant', 'unshift'),
-                            animation: invokeLater('$animateProvider', 'register'),
-                            filter: invokeLater('$filterProvider', 'register'),
-                            controller: invokeLater('$controllerProvider', 'register'),
-                            directive: invokeLater('$compileProvider', 'directive'),
+                            decorator: invokeLaterAndSetModuleName('$provide', 'decorator'),
+                            animation: invokeLaterAndSetModuleName('$animateProvider', 'register'),
+                            filter: invokeLaterAndSetModuleName('$filterProvider', 'register'),
+                            controller: invokeLaterAndSetModuleName('$controllerProvider', 'register'),
+                            directive: invokeLaterAndSetModuleName('$compileProvider', 'directive'),
+                            component: invokeLaterAndSetModuleName('$compileProvider', 'component'),
                             config: config,
                             run: function (block) {
                                 runBlocks.push(block);
@@ -710,9 +862,23 @@ define('angular', [], function () {
                             config(configFn);
                         }
                         return moduleInstance;
-                        function invokeLater(provider, method, insertMethod) {
+                        function invokeLater(provider, method, insertMethod, queue) {
+                            if (!queue)
+                                queue = invokeQueue;
                             return function () {
-                                invokeQueue[insertMethod || 'push']([
+                                queue[insertMethod || 'push']([
+                                    provider,
+                                    method,
+                                    arguments
+                                ]);
+                                return moduleInstance;
+                            };
+                        }
+                        function invokeLaterAndSetModuleName(provider, method) {
+                            return function (recipeName, factoryFunction) {
+                                if (factoryFunction && isFunction(factoryFunction))
+                                    factoryFunction.$$moduleName = name;
+                                invokeQueue.push([
                                     provider,
                                     method,
                                     arguments
@@ -724,18 +890,41 @@ define('angular', [], function () {
                 };
             });
         }
+        function serializeObject(obj) {
+            var seen = [];
+            return JSON.stringify(obj, function (key, val) {
+                val = toJsonReplacer(key, val);
+                if (isObject(val)) {
+                    if (seen.indexOf(val) >= 0)
+                        return '...';
+                    seen.push(val);
+                }
+                return val;
+            });
+        }
+        function toDebugString(obj) {
+            if (typeof obj === 'function') {
+                return obj.toString().replace(/ \{[\s\S]*$/, '');
+            } else if (isUndefined(obj)) {
+                return 'undefined';
+            } else if (typeof obj !== 'string') {
+                return serializeObject(obj);
+            }
+            return obj;
+        }
         var version = {
-            full: '1.2.3',
+            full: '1.5.4',
             major: 1,
-            minor: 2,
-            dot: 3,
-            codeName: 'unicorn-zapper'
+            minor: 5,
+            dot: 4,
+            codeName: 'graduated-sophistry'
         };
         function publishExternalAPI(angular) {
             extend(angular, {
                 'bootstrap': bootstrap,
                 'copy': copy,
                 'extend': extend,
+                'merge': merge,
                 'equals': equals,
                 'element': jqLite,
                 'forEach': forEach,
@@ -758,15 +947,12 @@ define('angular', [], function () {
                 'lowercase': lowercase,
                 'uppercase': uppercase,
                 'callbacks': { counter: 0 },
+                'getTestability': getTestability,
                 '$$minErr': minErr,
-                '$$csp': csp
+                '$$csp': csp,
+                'reloadWithDebugInfo': reloadWithDebugInfo
             });
             angularModule = setupModuleLoader(window);
-            try {
-                angularModule('ngLocale');
-            } catch (e) {
-                angularModule('ngLocale', []).provider('$locale', $LocaleProvider);
-            }
             angularModule('ng', ['ngLocale'], [
                 '$provide',
                 function ngModule($provide) {
@@ -806,101 +992,207 @@ define('angular', [], function () {
                         ngModel: ngModelDirective,
                         ngList: ngListDirective,
                         ngChange: ngChangeDirective,
+                        pattern: patternDirective,
+                        ngPattern: patternDirective,
                         required: requiredDirective,
                         ngRequired: requiredDirective,
-                        ngValue: ngValueDirective
-                    }).directive(ngAttributeAliasDirectives).directive(ngEventDirectives);
+                        minlength: minlengthDirective,
+                        ngMinlength: minlengthDirective,
+                        maxlength: maxlengthDirective,
+                        ngMaxlength: maxlengthDirective,
+                        ngValue: ngValueDirective,
+                        ngModelOptions: ngModelOptionsDirective
+                    }).directive({ ngInclude: ngIncludeFillContentDirective }).directive(ngAttributeAliasDirectives).directive(ngEventDirectives);
                     $provide.provider({
                         $anchorScroll: $AnchorScrollProvider,
                         $animate: $AnimateProvider,
+                        $animateCss: $CoreAnimateCssProvider,
+                        $$animateJs: $$CoreAnimateJsProvider,
+                        $$animateQueue: $$CoreAnimateQueueProvider,
+                        $$AnimateRunner: $$AnimateRunnerFactoryProvider,
+                        $$animateAsyncRun: $$AnimateAsyncRunFactoryProvider,
                         $browser: $BrowserProvider,
                         $cacheFactory: $CacheFactoryProvider,
                         $controller: $ControllerProvider,
                         $document: $DocumentProvider,
                         $exceptionHandler: $ExceptionHandlerProvider,
                         $filter: $FilterProvider,
+                        $$forceReflow: $$ForceReflowProvider,
                         $interpolate: $InterpolateProvider,
                         $interval: $IntervalProvider,
                         $http: $HttpProvider,
+                        $httpParamSerializer: $HttpParamSerializerProvider,
+                        $httpParamSerializerJQLike: $HttpParamSerializerJQLikeProvider,
                         $httpBackend: $HttpBackendProvider,
+                        $xhrFactory: $xhrFactoryProvider,
                         $location: $LocationProvider,
                         $log: $LogProvider,
                         $parse: $ParseProvider,
                         $rootScope: $RootScopeProvider,
                         $q: $QProvider,
+                        $$q: $$QProvider,
                         $sce: $SceProvider,
                         $sceDelegate: $SceDelegateProvider,
                         $sniffer: $SnifferProvider,
                         $templateCache: $TemplateCacheProvider,
+                        $templateRequest: $TemplateRequestProvider,
+                        $$testability: $$TestabilityProvider,
                         $timeout: $TimeoutProvider,
-                        $window: $WindowProvider
+                        $window: $WindowProvider,
+                        $$rAF: $$RAFProvider,
+                        $$jqLite: $$jqLiteProvider,
+                        $$HashMap: $$HashMapProvider,
+                        $$cookieReader: $$CookieReaderProvider
                     });
                 }
             ]);
         }
-        var jqCache = JQLite.cache = {}, jqName = JQLite.expando = 'ng-' + new Date().getTime(), jqId = 1, addEventListenerFn = window.document.addEventListener ? function (element, type, fn) {
+        JQLite.expando = 'ng339';
+        var jqCache = JQLite.cache = {}, jqId = 1, addEventListenerFn = function (element, type, fn) {
                 element.addEventListener(type, fn, false);
-            } : function (element, type, fn) {
-                element.attachEvent('on' + type, fn);
-            }, removeEventListenerFn = window.document.removeEventListener ? function (element, type, fn) {
+            }, removeEventListenerFn = function (element, type, fn) {
                 element.removeEventListener(type, fn, false);
-            } : function (element, type, fn) {
-                element.detachEvent('on' + type, fn);
             };
+        JQLite._data = function (node) {
+            return this.cache[node[this.expando]] || {};
+        };
         function jqNextId() {
             return ++jqId;
         }
         var SPECIAL_CHARS_REGEXP = /([\:\-\_]+(.))/g;
         var MOZ_HACK_REGEXP = /^moz([A-Z])/;
+        var MOUSE_EVENT_MAP = {
+            mouseleave: 'mouseout',
+            mouseenter: 'mouseover'
+        };
         var jqLiteMinErr = minErr('jqLite');
         function camelCase(name) {
             return name.replace(SPECIAL_CHARS_REGEXP, function (_, separator, letter, offset) {
                 return offset ? letter.toUpperCase() : letter;
             }).replace(MOZ_HACK_REGEXP, 'Moz$1');
         }
-        function jqLitePatchJQueryRemove(name, dispatchThis, filterElems, getterIfNoArguments) {
-            var originalJqFn = jQuery.fn[name];
-            originalJqFn = originalJqFn.$original || originalJqFn;
-            removePatch.$original = originalJqFn;
-            jQuery.fn[name] = removePatch;
-            function removePatch(param) {
-                var list = filterElems && param ? [this.filter(param)] : [this], fireEvent = dispatchThis, set, setIndex, setLength, element, childIndex, childLength, children;
-                if (!getterIfNoArguments || param != null) {
-                    while (list.length) {
-                        set = list.shift();
-                        for (setIndex = 0, setLength = set.length; setIndex < setLength; setIndex++) {
-                            element = jqLite(set[setIndex]);
-                            if (fireEvent) {
-                                element.triggerHandler('$destroy');
-                            } else {
-                                fireEvent = !fireEvent;
-                            }
-                            for (childIndex = 0, childLength = (children = element.children()).length; childIndex < childLength; childIndex++) {
-                                list.push(jQuery(children[childIndex]));
-                            }
-                        }
-                    }
-                }
-                return originalJqFn.apply(this, arguments);
+        var SINGLE_TAG_REGEXP = /^<([\w-]+)\s*\/?>(?:<\/\1>|)$/;
+        var HTML_REGEXP = /<|&#?\w+;/;
+        var TAG_NAME_REGEXP = /<([\w:-]+)/;
+        var XHTML_TAG_REGEXP = /<(?!area|br|col|embed|hr|img|input|link|meta|param)(([\w:-]+)[^>]*)\/>/gi;
+        var wrapMap = {
+            'option': [
+                1,
+                '<select multiple="multiple">',
+                '</select>'
+            ],
+            'thead': [
+                1,
+                '<table>',
+                '</table>'
+            ],
+            'col': [
+                2,
+                '<table><colgroup>',
+                '</colgroup></table>'
+            ],
+            'tr': [
+                2,
+                '<table><tbody>',
+                '</tbody></table>'
+            ],
+            'td': [
+                3,
+                '<table><tbody><tr>',
+                '</tr></tbody></table>'
+            ],
+            '_default': [
+                0,
+                '',
+                ''
+            ]
+        };
+        wrapMap.optgroup = wrapMap.option;
+        wrapMap.tbody = wrapMap.tfoot = wrapMap.colgroup = wrapMap.caption = wrapMap.thead;
+        wrapMap.th = wrapMap.td;
+        function jqLiteIsTextNode(html) {
+            return !HTML_REGEXP.test(html);
+        }
+        function jqLiteAcceptsData(node) {
+            var nodeType = node.nodeType;
+            return nodeType === NODE_TYPE_ELEMENT || !nodeType || nodeType === NODE_TYPE_DOCUMENT;
+        }
+        function jqLiteHasData(node) {
+            for (var key in jqCache[node.ng339]) {
+                return true;
+            }
+            return false;
+        }
+        function jqLiteCleanData(nodes) {
+            for (var i = 0, ii = nodes.length; i < ii; i++) {
+                jqLiteRemoveData(nodes[i]);
             }
         }
+        function jqLiteBuildFragment(html, context) {
+            var tmp, tag, wrap, fragment = context.createDocumentFragment(), nodes = [], i;
+            if (jqLiteIsTextNode(html)) {
+                nodes.push(context.createTextNode(html));
+            } else {
+                tmp = tmp || fragment.appendChild(context.createElement('div'));
+                tag = (TAG_NAME_REGEXP.exec(html) || [
+                    '',
+                    ''
+                ])[1].toLowerCase();
+                wrap = wrapMap[tag] || wrapMap._default;
+                tmp.innerHTML = wrap[1] + html.replace(XHTML_TAG_REGEXP, '<$1></$2>') + wrap[2];
+                i = wrap[0];
+                while (i--) {
+                    tmp = tmp.lastChild;
+                }
+                nodes = concat(nodes, tmp.childNodes);
+                tmp = fragment.firstChild;
+                tmp.textContent = '';
+            }
+            fragment.textContent = '';
+            fragment.innerHTML = '';
+            forEach(nodes, function (node) {
+                fragment.appendChild(node);
+            });
+            return fragment;
+        }
+        function jqLiteParseHTML(html, context) {
+            context = context || window.document;
+            var parsed;
+            if (parsed = SINGLE_TAG_REGEXP.exec(html)) {
+                return [context.createElement(parsed[1])];
+            }
+            if (parsed = jqLiteBuildFragment(html, context)) {
+                return parsed.childNodes;
+            }
+            return [];
+        }
+        function jqLiteWrapNode(node, wrapper) {
+            var parent = node.parentNode;
+            if (parent) {
+                parent.replaceChild(wrapper, node);
+            }
+            wrapper.appendChild(node);
+        }
+        var jqLiteContains = window.Node.prototype.contains || function (arg) {
+            return !!(this.compareDocumentPosition(arg) & 16);
+        };
         function JQLite(element) {
             if (element instanceof JQLite) {
                 return element;
             }
+            var argIsString;
+            if (isString(element)) {
+                element = trim(element);
+                argIsString = true;
+            }
             if (!(this instanceof JQLite)) {
-                if (isString(element) && element.charAt(0) != '<') {
+                if (argIsString && element.charAt(0) != '<') {
                     throw jqLiteMinErr('nosel', 'Looking up elements via selectors is not supported by jqLite! See: http://docs.angularjs.org/api/angular.element');
                 }
                 return new JQLite(element);
             }
-            if (isString(element)) {
-                var div = document.createElement('div');
-                div.innerHTML = '<div>&#160;</div>' + element;
-                div.removeChild(div.firstChild);
-                jqLiteAddNodes(this, div.childNodes);
-                var fragment = jqLite(document.createDocumentFragment());
-                fragment.append(this);
+            if (argIsString) {
+                jqLiteAddNodes(this, jqLiteParseHTML(element));
             } else {
                 jqLiteAddNodes(this, element);
             }
@@ -908,77 +1200,99 @@ define('angular', [], function () {
         function jqLiteClone(element) {
             return element.cloneNode(true);
         }
-        function jqLiteDealoc(element) {
-            jqLiteRemoveData(element);
-            for (var i = 0, children = element.childNodes || []; i < children.length; i++) {
-                jqLiteDealoc(children[i]);
+        function jqLiteDealoc(element, onlyDescendants) {
+            if (!onlyDescendants)
+                jqLiteRemoveData(element);
+            if (element.querySelectorAll) {
+                var descendants = element.querySelectorAll('*');
+                for (var i = 0, l = descendants.length; i < l; i++) {
+                    jqLiteRemoveData(descendants[i]);
+                }
             }
         }
         function jqLiteOff(element, type, fn, unsupported) {
             if (isDefined(unsupported))
                 throw jqLiteMinErr('offargs', 'jqLite#off() does not support the `selector` argument');
-            var events = jqLiteExpandoStore(element, 'events'), handle = jqLiteExpandoStore(element, 'handle');
+            var expandoStore = jqLiteExpandoStore(element);
+            var events = expandoStore && expandoStore.events;
+            var handle = expandoStore && expandoStore.handle;
             if (!handle)
                 return;
-            if (isUndefined(type)) {
-                forEach(events, function (eventHandler, type) {
-                    removeEventListenerFn(element, type, eventHandler);
+            if (!type) {
+                for (type in events) {
+                    if (type !== '$destroy') {
+                        removeEventListenerFn(element, type, handle);
+                    }
                     delete events[type];
-                });
+                }
             } else {
-                forEach(type.split(' '), function (type) {
-                    if (isUndefined(fn)) {
-                        removeEventListenerFn(element, type, events[type]);
+                var removeHandler = function (type) {
+                    var listenerFns = events[type];
+                    if (isDefined(fn)) {
+                        arrayRemove(listenerFns || [], fn);
+                    }
+                    if (!(isDefined(fn) && listenerFns && listenerFns.length > 0)) {
+                        removeEventListenerFn(element, type, handle);
                         delete events[type];
-                    } else {
-                        arrayRemove(events[type] || [], fn);
+                    }
+                };
+                forEach(type.split(' '), function (type) {
+                    removeHandler(type);
+                    if (MOUSE_EVENT_MAP[type]) {
+                        removeHandler(MOUSE_EVENT_MAP[type]);
                     }
                 });
             }
         }
         function jqLiteRemoveData(element, name) {
-            var expandoId = element[jqName], expandoStore = jqCache[expandoId];
+            var expandoId = element.ng339;
+            var expandoStore = expandoId && jqCache[expandoId];
             if (expandoStore) {
                 if (name) {
-                    delete jqCache[expandoId].data[name];
+                    delete expandoStore.data[name];
                     return;
                 }
                 if (expandoStore.handle) {
-                    expandoStore.events.$destroy && expandoStore.handle({}, '$destroy');
+                    if (expandoStore.events.$destroy) {
+                        expandoStore.handle({}, '$destroy');
+                    }
                     jqLiteOff(element);
                 }
                 delete jqCache[expandoId];
-                element[jqName] = undefined;
+                element.ng339 = undefined;
             }
         }
-        function jqLiteExpandoStore(element, key, value) {
-            var expandoId = element[jqName], expandoStore = jqCache[expandoId || -1];
-            if (isDefined(value)) {
-                if (!expandoStore) {
-                    element[jqName] = expandoId = jqNextId();
-                    expandoStore = jqCache[expandoId] = {};
-                }
-                expandoStore[key] = value;
-            } else {
-                return expandoStore && expandoStore[key];
+        function jqLiteExpandoStore(element, createIfNecessary) {
+            var expandoId = element.ng339, expandoStore = expandoId && jqCache[expandoId];
+            if (createIfNecessary && !expandoStore) {
+                element.ng339 = expandoId = jqNextId();
+                expandoStore = jqCache[expandoId] = {
+                    events: {},
+                    data: {},
+                    handle: undefined
+                };
             }
+            return expandoStore;
         }
         function jqLiteData(element, key, value) {
-            var data = jqLiteExpandoStore(element, 'data'), isSetter = isDefined(value), keyDefined = !isSetter && isDefined(key), isSimpleGetter = keyDefined && !isObject(key);
-            if (!data && !isSimpleGetter) {
-                jqLiteExpandoStore(element, 'data', data = {});
-            }
-            if (isSetter) {
-                data[key] = value;
-            } else {
-                if (keyDefined) {
-                    if (isSimpleGetter) {
-                        return data && data[key];
-                    } else {
-                        extend(data, key);
-                    }
+            if (jqLiteAcceptsData(element)) {
+                var isSimpleSetter = isDefined(value);
+                var isSimpleGetter = !isSimpleSetter && key && !isObject(key);
+                var massGetter = !key;
+                var expandoStore = jqLiteExpandoStore(element, !isSimpleGetter);
+                var data = expandoStore && expandoStore.data;
+                if (isSimpleSetter) {
+                    data[key] = value;
                 } else {
-                    return data;
+                    if (massGetter) {
+                        return data;
+                    } else {
+                        if (isSimpleGetter) {
+                            return data && data[key];
+                        } else {
+                            extend(data, key);
+                        }
+                    }
                 }
             }
         }
@@ -1008,9 +1322,19 @@ define('angular', [], function () {
         }
         function jqLiteAddNodes(root, elements) {
             if (elements) {
-                elements = !elements.nodeName && isDefined(elements.length) && !isWindow(elements) ? elements : [elements];
-                for (var i = 0; i < elements.length; i++) {
-                    root.push(elements[i]);
+                if (elements.nodeType) {
+                    root[root.length++] = elements;
+                } else {
+                    var length = elements.length;
+                    if (typeof length === 'number' && elements.window !== elements) {
+                        if (length) {
+                            for (var i = 0; i < length; i++) {
+                                root[root.length++] = elements[i];
+                            }
+                        }
+                    } else {
+                        root[root.length++] = elements;
+                    }
                 }
             }
         }
@@ -1018,17 +1342,37 @@ define('angular', [], function () {
             return jqLiteInheritedData(element, '$' + (name || 'ngController') + 'Controller');
         }
         function jqLiteInheritedData(element, name, value) {
-            element = jqLite(element);
-            if (element[0].nodeType == 9) {
-                element = element.find('html');
+            if (element.nodeType == NODE_TYPE_DOCUMENT) {
+                element = element.documentElement;
             }
             var names = isArray(name) ? name : [name];
-            while (element.length) {
+            while (element) {
                 for (var i = 0, ii = names.length; i < ii; i++) {
-                    if ((value = element.data(names[i])) !== undefined)
+                    if (isDefined(value = jqLite.data(element, names[i])))
                         return value;
                 }
-                element = element.parent();
+                element = element.parentNode || element.nodeType === NODE_TYPE_DOCUMENT_FRAGMENT && element.host;
+            }
+        }
+        function jqLiteEmpty(element) {
+            jqLiteDealoc(element, true);
+            while (element.firstChild) {
+                element.removeChild(element.firstChild);
+            }
+        }
+        function jqLiteRemove(element, keepData) {
+            if (!keepData)
+                jqLiteDealoc(element);
+            var parent = element.parentNode;
+            if (parent)
+                parent.removeChild(element);
+        }
+        function jqLiteDocumentLoaded(action, win) {
+            win = win || window;
+            if (win.document.readyState === 'complete') {
+                win.setTimeout(action);
+            } else {
+                jqLite(win).on('load', action);
             }
         }
         var JQLitePrototype = JQLite.prototype = {
@@ -1040,8 +1384,8 @@ define('angular', [], function () {
                     fired = true;
                     fn();
                 }
-                if (document.readyState === 'complete') {
-                    setTimeout(trigger);
+                if (window.document.readyState === 'complete') {
+                    window.setTimeout(trigger);
                 } else {
                     this.on('DOMContentLoaded', trigger);
                     JQLite(window).on('load', trigger);
@@ -1068,23 +1412,41 @@ define('angular', [], function () {
         });
         var BOOLEAN_ELEMENTS = {};
         forEach('input,select,option,textarea,button,form,details'.split(','), function (value) {
-            BOOLEAN_ELEMENTS[uppercase(value)] = true;
+            BOOLEAN_ELEMENTS[value] = true;
         });
+        var ALIASED_ATTR = {
+            'ngMinlength': 'minlength',
+            'ngMaxlength': 'maxlength',
+            'ngMin': 'min',
+            'ngMax': 'max',
+            'ngPattern': 'pattern'
+        };
         function getBooleanAttrName(element, name) {
             var booleanAttr = BOOLEAN_ATTR[name.toLowerCase()];
-            return booleanAttr && BOOLEAN_ELEMENTS[element.nodeName] && booleanAttr;
+            return booleanAttr && BOOLEAN_ELEMENTS[nodeName_(element)] && booleanAttr;
         }
+        function getAliasedAttrName(name) {
+            return ALIASED_ATTR[name];
+        }
+        forEach({
+            data: jqLiteData,
+            removeData: jqLiteRemoveData,
+            hasData: jqLiteHasData,
+            cleanData: jqLiteCleanData
+        }, function (fn, name) {
+            JQLite[name] = fn;
+        });
         forEach({
             data: jqLiteData,
             inheritedData: jqLiteInheritedData,
             scope: function (element) {
-                return jqLite(element).data('$scope') || jqLiteInheritedData(element.parentNode || element, [
+                return jqLite.data(element, '$scope') || jqLiteInheritedData(element.parentNode || element, [
                     '$isolateScope',
                     '$scope'
                 ]);
             },
             isolateScope: function (element) {
-                return jqLite(element).data('$isolateScope') || jqLite(element).data('$isolateScopeNoTemplate');
+                return jqLite.data(element, '$isolateScope') || jqLite.data(element, '$isolateScopeNoTemplate');
             },
             controller: jqLiteController,
             injector: function (element) {
@@ -1099,20 +1461,14 @@ define('angular', [], function () {
                 if (isDefined(value)) {
                     element.style[name] = value;
                 } else {
-                    var val;
-                    if (msie <= 8) {
-                        val = element.currentStyle && element.currentStyle[name];
-                        if (val === '')
-                            val = 'auto';
-                    }
-                    val = val || element.style[name];
-                    if (msie <= 8) {
-                        val = val === '' ? undefined : val;
-                    }
-                    return val;
+                    return element.style[name];
                 }
             },
             attr: function (element, name, value) {
+                var nodeType = element.nodeType;
+                if (nodeType === NODE_TYPE_TEXT || nodeType === NODE_TYPE_ATTRIBUTE || nodeType === NODE_TYPE_COMMENT) {
+                    return;
+                }
                 var lowercasedName = lowercase(name);
                 if (BOOLEAN_ATTR[lowercasedName]) {
                     if (isDefined(value)) {
@@ -1141,26 +1497,19 @@ define('angular', [], function () {
                 }
             },
             text: function () {
-                var NODE_TYPE_TEXT_PROPERTY = [];
-                if (msie < 9) {
-                    NODE_TYPE_TEXT_PROPERTY[1] = 'innerText';
-                    NODE_TYPE_TEXT_PROPERTY[3] = 'nodeValue';
-                } else {
-                    NODE_TYPE_TEXT_PROPERTY[1] = NODE_TYPE_TEXT_PROPERTY[3] = 'textContent';
-                }
                 getText.$dv = '';
                 return getText;
                 function getText(element, value) {
-                    var textProp = NODE_TYPE_TEXT_PROPERTY[element.nodeType];
                     if (isUndefined(value)) {
-                        return textProp ? element[textProp] : '';
+                        var nodeType = element.nodeType;
+                        return nodeType === NODE_TYPE_ELEMENT || nodeType === NODE_TYPE_TEXT ? element.textContent : '';
                     }
-                    element[textProp] = value;
+                    element.textContent = value;
                 }
             }(),
             val: function (element, value) {
                 if (isUndefined(value)) {
-                    if (nodeName_(element) === 'SELECT' && element.multiple) {
+                    if (element.multiple && nodeName_(element) === 'select') {
                         var result = [];
                         forEach(element.options, function (option) {
                             if (option.selected) {
@@ -1177,17 +1526,17 @@ define('angular', [], function () {
                 if (isUndefined(value)) {
                     return element.innerHTML;
                 }
-                for (var i = 0, childNodes = element.childNodes; i < childNodes.length; i++) {
-                    jqLiteDealoc(childNodes[i]);
-                }
+                jqLiteDealoc(element, true);
                 element.innerHTML = value;
-            }
+            },
+            empty: jqLiteEmpty
         }, function (fn, name) {
             JQLite.prototype[name] = function (arg1, arg2) {
                 var i, key;
-                if ((fn.length == 2 && (fn !== jqLiteHasClass && fn !== jqLiteController) ? arg1 : arg2) === undefined) {
+                var nodeCount = this.length;
+                if (fn !== jqLiteEmpty && isUndefined(fn.length == 2 && (fn !== jqLiteHasClass && fn !== jqLiteController) ? arg1 : arg2)) {
                     if (isObject(arg1)) {
-                        for (i = 0; i < this.length; i++) {
+                        for (i = 0; i < nodeCount; i++) {
                             if (fn === jqLiteData) {
                                 fn(this[i], arg1);
                             } else {
@@ -1199,7 +1548,7 @@ define('angular', [], function () {
                         return this;
                     } else {
                         var value = fn.$dv;
-                        var jj = value === undefined ? Math.min(this.length, 1) : this.length;
+                        var jj = isUndefined(value) ? Math.min(nodeCount, 1) : nodeCount;
                         for (var j = 0; j < jj; j++) {
                             var nodeValue = fn(this[j], arg1, arg2);
                             value = value ? value + nodeValue : nodeValue;
@@ -1207,7 +1556,7 @@ define('angular', [], function () {
                         return value;
                     }
                 } else {
-                    for (i = 0; i < this.length; i++) {
+                    for (i = 0; i < nodeCount; i++) {
                         fn(this[i], arg1, arg2);
                     }
                     return this;
@@ -1216,95 +1565,96 @@ define('angular', [], function () {
         });
         function createEventHandler(element, events) {
             var eventHandler = function (event, type) {
-                if (!event.preventDefault) {
-                    event.preventDefault = function () {
-                        event.returnValue = false;
-                    };
-                }
-                if (!event.stopPropagation) {
-                    event.stopPropagation = function () {
-                        event.cancelBubble = true;
-                    };
-                }
-                if (!event.target) {
-                    event.target = event.srcElement || document;
-                }
-                if (isUndefined(event.defaultPrevented)) {
-                    var prevent = event.preventDefault;
-                    event.preventDefault = function () {
-                        event.defaultPrevented = true;
-                        prevent.call(event);
-                    };
-                    event.defaultPrevented = false;
-                }
                 event.isDefaultPrevented = function () {
-                    return event.defaultPrevented || event.returnValue === false;
+                    return event.defaultPrevented;
                 };
-                forEach(events[type || event.type], function (fn) {
-                    fn.call(element, event);
-                });
-                if (msie <= 8) {
-                    event.preventDefault = null;
-                    event.stopPropagation = null;
-                    event.isDefaultPrevented = null;
-                } else {
-                    delete event.preventDefault;
-                    delete event.stopPropagation;
-                    delete event.isDefaultPrevented;
+                var eventFns = events[type || event.type];
+                var eventFnsLength = eventFns ? eventFns.length : 0;
+                if (!eventFnsLength)
+                    return;
+                if (isUndefined(event.immediatePropagationStopped)) {
+                    var originalStopImmediatePropagation = event.stopImmediatePropagation;
+                    event.stopImmediatePropagation = function () {
+                        event.immediatePropagationStopped = true;
+                        if (event.stopPropagation) {
+                            event.stopPropagation();
+                        }
+                        if (originalStopImmediatePropagation) {
+                            originalStopImmediatePropagation.call(event);
+                        }
+                    };
+                }
+                event.isImmediatePropagationStopped = function () {
+                    return event.immediatePropagationStopped === true;
+                };
+                var handlerWrapper = eventFns.specialHandlerWrapper || defaultHandlerWrapper;
+                if (eventFnsLength > 1) {
+                    eventFns = shallowCopy(eventFns);
+                }
+                for (var i = 0; i < eventFnsLength; i++) {
+                    if (!event.isImmediatePropagationStopped()) {
+                        handlerWrapper(element, event, eventFns[i]);
+                    }
                 }
             };
             eventHandler.elem = element;
             return eventHandler;
         }
+        function defaultHandlerWrapper(element, event, handler) {
+            handler.call(element, event);
+        }
+        function specialMouseHandlerWrapper(target, event, handler) {
+            var related = event.relatedTarget;
+            if (!related || related !== target && !jqLiteContains.call(target, related)) {
+                handler.call(target, event);
+            }
+        }
         forEach({
             removeData: jqLiteRemoveData,
-            dealoc: jqLiteDealoc,
-            on: function onFn(element, type, fn, unsupported) {
+            on: function jqLiteOn(element, type, fn, unsupported) {
                 if (isDefined(unsupported))
                     throw jqLiteMinErr('onargs', 'jqLite#on() does not support the `selector` or `eventData` parameters');
-                var events = jqLiteExpandoStore(element, 'events'), handle = jqLiteExpandoStore(element, 'handle');
-                if (!events)
-                    jqLiteExpandoStore(element, 'events', events = {});
-                if (!handle)
-                    jqLiteExpandoStore(element, 'handle', handle = createEventHandler(element, events));
-                forEach(type.split(' '), function (type) {
+                if (!jqLiteAcceptsData(element)) {
+                    return;
+                }
+                var expandoStore = jqLiteExpandoStore(element, true);
+                var events = expandoStore.events;
+                var handle = expandoStore.handle;
+                if (!handle) {
+                    handle = expandoStore.handle = createEventHandler(element, events);
+                }
+                var types = type.indexOf(' ') >= 0 ? type.split(' ') : [type];
+                var i = types.length;
+                var addHandler = function (type, specialHandlerWrapper, noEventListener) {
                     var eventFns = events[type];
                     if (!eventFns) {
-                        if (type == 'mouseenter' || type == 'mouseleave') {
-                            var contains = document.body.contains || document.body.compareDocumentPosition ? function (a, b) {
-                                var adown = a.nodeType === 9 ? a.documentElement : a, bup = b && b.parentNode;
-                                return a === bup || !!(bup && bup.nodeType === 1 && (adown.contains ? adown.contains(bup) : a.compareDocumentPosition && a.compareDocumentPosition(bup) & 16));
-                            } : function (a, b) {
-                                if (b) {
-                                    while (b = b.parentNode) {
-                                        if (b === a) {
-                                            return true;
-                                        }
-                                    }
-                                }
-                                return false;
-                            };
-                            events[type] = [];
-                            var eventmap = {
-                                mouseleave: 'mouseout',
-                                mouseenter: 'mouseover'
-                            };
-                            onFn(element, eventmap[type], function (event) {
-                                var target = this, related = event.relatedTarget;
-                                if (!related || related !== target && !contains(target, related)) {
-                                    handle(event, type);
-                                }
-                            });
-                        } else {
+                        eventFns = events[type] = [];
+                        eventFns.specialHandlerWrapper = specialHandlerWrapper;
+                        if (type !== '$destroy' && !noEventListener) {
                             addEventListenerFn(element, type, handle);
-                            events[type] = [];
                         }
-                        eventFns = events[type];
                     }
                     eventFns.push(fn);
-                });
+                };
+                while (i--) {
+                    type = types[i];
+                    if (MOUSE_EVENT_MAP[type]) {
+                        addHandler(MOUSE_EVENT_MAP[type], specialMouseHandlerWrapper);
+                        addHandler(type, undefined, true);
+                    } else {
+                        addHandler(type);
+                    }
+                }
             },
             off: jqLiteOff,
+            one: function (element, type, fn) {
+                element = jqLite(element);
+                element.on(type, function onFn() {
+                    element.off(type, fn);
+                    element.off(type, onFn);
+                });
+                element.on(type, fn);
+            },
             replaceWith: function (element, replaceNode) {
                 var index, parent = element.parentNode;
                 jqLiteDealoc(element);
@@ -1320,23 +1670,27 @@ define('angular', [], function () {
             children: function (element) {
                 var children = [];
                 forEach(element.childNodes, function (element) {
-                    if (element.nodeType === 1)
+                    if (element.nodeType === NODE_TYPE_ELEMENT) {
                         children.push(element);
+                    }
                 });
                 return children;
             },
             contents: function (element) {
-                return element.childNodes || [];
+                return element.contentDocument || element.childNodes || [];
             },
             append: function (element, node) {
-                forEach(new JQLite(node), function (child) {
-                    if (element.nodeType === 1 || element.nodeType === 11) {
-                        element.appendChild(child);
-                    }
-                });
+                var nodeType = element.nodeType;
+                if (nodeType !== NODE_TYPE_ELEMENT && nodeType !== NODE_TYPE_DOCUMENT_FRAGMENT)
+                    return;
+                node = new JQLite(node);
+                for (var i = 0, ii = node.length; i < ii; i++) {
+                    var child = node[i];
+                    element.appendChild(child);
+                }
             },
             prepend: function (element, node) {
-                if (element.nodeType === 1) {
+                if (element.nodeType === NODE_TYPE_ELEMENT) {
                     var index = element.firstChild;
                     forEach(new JQLite(node), function (child) {
                         element.insertBefore(child, index);
@@ -1344,67 +1698,89 @@ define('angular', [], function () {
                 }
             },
             wrap: function (element, wrapNode) {
-                wrapNode = jqLite(wrapNode)[0];
-                var parent = element.parentNode;
-                if (parent) {
-                    parent.replaceChild(wrapNode, element);
-                }
-                wrapNode.appendChild(element);
+                jqLiteWrapNode(element, jqLite(wrapNode).eq(0).clone()[0]);
             },
-            remove: function (element) {
-                jqLiteDealoc(element);
-                var parent = element.parentNode;
-                if (parent)
-                    parent.removeChild(element);
+            remove: jqLiteRemove,
+            detach: function (element) {
+                jqLiteRemove(element, true);
             },
             after: function (element, newElement) {
                 var index = element, parent = element.parentNode;
-                forEach(new JQLite(newElement), function (node) {
+                newElement = new JQLite(newElement);
+                for (var i = 0, ii = newElement.length; i < ii; i++) {
+                    var node = newElement[i];
                     parent.insertBefore(node, index.nextSibling);
                     index = node;
-                });
+                }
             },
             addClass: jqLiteAddClass,
             removeClass: jqLiteRemoveClass,
             toggleClass: function (element, selector, condition) {
-                if (isUndefined(condition)) {
-                    condition = !jqLiteHasClass(element, selector);
+                if (selector) {
+                    forEach(selector.split(' '), function (className) {
+                        var classCondition = condition;
+                        if (isUndefined(classCondition)) {
+                            classCondition = !jqLiteHasClass(element, className);
+                        }
+                        (classCondition ? jqLiteAddClass : jqLiteRemoveClass)(element, className);
+                    });
                 }
-                (condition ? jqLiteAddClass : jqLiteRemoveClass)(element, selector);
             },
             parent: function (element) {
                 var parent = element.parentNode;
-                return parent && parent.nodeType !== 11 ? parent : null;
+                return parent && parent.nodeType !== NODE_TYPE_DOCUMENT_FRAGMENT ? parent : null;
             },
             next: function (element) {
-                if (element.nextElementSibling) {
-                    return element.nextElementSibling;
-                }
-                var elm = element.nextSibling;
-                while (elm != null && elm.nodeType !== 1) {
-                    elm = elm.nextSibling;
-                }
-                return elm;
+                return element.nextElementSibling;
             },
             find: function (element, selector) {
-                return element.getElementsByTagName(selector);
+                if (element.getElementsByTagName) {
+                    return element.getElementsByTagName(selector);
+                } else {
+                    return [];
+                }
             },
             clone: jqLiteClone,
-            triggerHandler: function (element, eventName, eventData) {
-                var eventFns = (jqLiteExpandoStore(element, 'events') || {})[eventName];
-                eventData = eventData || [];
-                var event = [{
-                        preventDefault: noop,
-                        stopPropagation: noop
-                    }];
-                forEach(eventFns, function (fn) {
-                    fn.apply(element, event.concat(eventData));
-                });
+            triggerHandler: function (element, event, extraParameters) {
+                var dummyEvent, eventFnsCopy, handlerArgs;
+                var eventName = event.type || event;
+                var expandoStore = jqLiteExpandoStore(element);
+                var events = expandoStore && expandoStore.events;
+                var eventFns = events && events[eventName];
+                if (eventFns) {
+                    dummyEvent = {
+                        preventDefault: function () {
+                            this.defaultPrevented = true;
+                        },
+                        isDefaultPrevented: function () {
+                            return this.defaultPrevented === true;
+                        },
+                        stopImmediatePropagation: function () {
+                            this.immediatePropagationStopped = true;
+                        },
+                        isImmediatePropagationStopped: function () {
+                            return this.immediatePropagationStopped === true;
+                        },
+                        stopPropagation: noop,
+                        type: eventName,
+                        target: element
+                    };
+                    if (event.type) {
+                        dummyEvent = extend(dummyEvent, event);
+                    }
+                    eventFnsCopy = shallowCopy(eventFns);
+                    handlerArgs = extraParameters ? [dummyEvent].concat(extraParameters) : [dummyEvent];
+                    forEach(eventFnsCopy, function (fn) {
+                        if (!dummyEvent.isImmediatePropagationStopped()) {
+                            fn.apply(element, handlerArgs);
+                        }
+                    });
+                }
             }
         }, function (fn, name) {
             JQLite.prototype[name] = function (arg1, arg2, arg3) {
                 var value;
-                for (var i = 0; i < this.length; i++) {
+                for (var i = 0, ii = this.length; i < ii; i++) {
                     if (isUndefined(value)) {
                         value = fn(this[i], arg1, arg2, arg3);
                         if (isDefined(value)) {
@@ -1419,48 +1795,100 @@ define('angular', [], function () {
             JQLite.prototype.bind = JQLite.prototype.on;
             JQLite.prototype.unbind = JQLite.prototype.off;
         });
-        function hashKey(obj) {
-            var objType = typeof obj, key;
-            if (objType == 'object' && obj !== null) {
-                if (typeof (key = obj.$$hashKey) == 'function') {
-                    key = obj.$$hashKey();
-                } else if (key === undefined) {
-                    key = obj.$$hashKey = nextUid();
-                }
-            } else {
-                key = obj;
-            }
-            return objType + ':' + key;
+        function $$jqLiteProvider() {
+            this.$get = function $$jqLite() {
+                return extend(JQLite, {
+                    hasClass: function (node, classes) {
+                        if (node.attr)
+                            node = node[0];
+                        return jqLiteHasClass(node, classes);
+                    },
+                    addClass: function (node, classes) {
+                        if (node.attr)
+                            node = node[0];
+                        return jqLiteAddClass(node, classes);
+                    },
+                    removeClass: function (node, classes) {
+                        if (node.attr)
+                            node = node[0];
+                        return jqLiteRemoveClass(node, classes);
+                    }
+                });
+            };
         }
-        function HashMap(array) {
+        function hashKey(obj, nextUidFn) {
+            var key = obj && obj.$$hashKey;
+            if (key) {
+                if (typeof key === 'function') {
+                    key = obj.$$hashKey();
+                }
+                return key;
+            }
+            var objType = typeof obj;
+            if (objType == 'function' || objType == 'object' && obj !== null) {
+                key = obj.$$hashKey = objType + ':' + (nextUidFn || nextUid)();
+            } else {
+                key = objType + ':' + obj;
+            }
+            return key;
+        }
+        function HashMap(array, isolatedUid) {
+            if (isolatedUid) {
+                var uid = 0;
+                this.nextUid = function () {
+                    return ++uid;
+                };
+            }
             forEach(array, this.put, this);
         }
         HashMap.prototype = {
             put: function (key, value) {
-                this[hashKey(key)] = value;
+                this[hashKey(key, this.nextUid)] = value;
             },
             get: function (key) {
-                return this[hashKey(key)];
+                return this[hashKey(key, this.nextUid)];
             },
             remove: function (key) {
-                var value = this[key = hashKey(key)];
+                var value = this[key = hashKey(key, this.nextUid)];
                 delete this[key];
                 return value;
             }
         };
-        var FN_ARGS = /^function\s*[^\(]*\(\s*([^\)]*)\)/m;
+        var $$HashMapProvider = [function () {
+                this.$get = [function () {
+                        return HashMap;
+                    }];
+            }];
+        var ARROW_ARG = /^([^\(]+?)=>/;
+        var FN_ARGS = /^[^\(]*\(\s*([^\)]*)\)/m;
         var FN_ARG_SPLIT = /,/;
         var FN_ARG = /^\s*(_?)(\S+?)\1\s*$/;
         var STRIP_COMMENTS = /((\/\/.*$)|(\/\*[\s\S]*?\*\/))/gm;
         var $injectorMinErr = minErr('$injector');
-        function annotate(fn) {
-            var $inject, fnText, argDecl, last;
-            if (typeof fn == 'function') {
+        function extractArgs(fn) {
+            var fnText = Function.prototype.toString.call(fn).replace(STRIP_COMMENTS, ''), args = fnText.match(ARROW_ARG) || fnText.match(FN_ARGS);
+            return args;
+        }
+        function anonFn(fn) {
+            var args = extractArgs(fn);
+            if (args) {
+                return 'function(' + (args[1] || '').replace(/[\s\r\n]+/, ' ') + ')';
+            }
+            return 'fn';
+        }
+        function annotate(fn, strictDi, name) {
+            var $inject, argDecl, last;
+            if (typeof fn === 'function') {
                 if (!($inject = fn.$inject)) {
                     $inject = [];
                     if (fn.length) {
-                        fnText = fn.toString().replace(STRIP_COMMENTS, '');
-                        argDecl = fnText.match(FN_ARGS);
+                        if (strictDi) {
+                            if (!isString(name) || !name) {
+                                name = fn.name || anonFn(fn);
+                            }
+                            throw $injectorMinErr('strictdi', '{0} is not using explicit annotation and cannot be invoked in strict mode', name);
+                        }
+                        argDecl = extractArgs(fn);
                         forEach(argDecl[1].split(FN_ARG_SPLIT), function (arg) {
                             arg.replace(FN_ARG, function (all, underscore, name) {
                                 $inject.push(name);
@@ -1478,8 +1906,9 @@ define('angular', [], function () {
             }
             return $inject;
         }
-        function createInjector(modulesToLoad) {
-            var INSTANTIATING = {}, providerSuffix = 'Provider', path = [], loadedModules = new HashMap(), providerCache = {
+        function createInjector(modulesToLoad, strictDi) {
+            strictDi = strictDi === true;
+            var INSTANTIATING = {}, providerSuffix = 'Provider', path = [], loadedModules = new HashMap([], true), providerCache = {
                     $provide: {
                         provider: supportObject(provider),
                         factory: supportObject(factory),
@@ -1488,14 +1917,22 @@ define('angular', [], function () {
                         constant: supportObject(constant),
                         decorator: decorator
                     }
-                }, providerInjector = providerCache.$injector = createInternalInjector(providerCache, function () {
+                }, providerInjector = providerCache.$injector = createInternalInjector(providerCache, function (serviceName, caller) {
+                    if (angular.isString(caller)) {
+                        path.push(caller);
+                    }
                     throw $injectorMinErr('unpr', 'Unknown provider: {0}', path.join(' <- '));
-                }), instanceCache = {}, instanceInjector = instanceCache.$injector = createInternalInjector(instanceCache, function (servicename) {
-                    var provider = providerInjector.get(servicename + providerSuffix);
-                    return instanceInjector.invoke(provider.$get, provider);
-                });
-            forEach(loadModules(modulesToLoad), function (fn) {
-                instanceInjector.invoke(fn || noop);
+                }), instanceCache = {}, protoInstanceInjector = createInternalInjector(instanceCache, function (serviceName, caller) {
+                    var provider = providerInjector.get(serviceName + providerSuffix, caller);
+                    return instanceInjector.invoke(provider.$get, provider, undefined, serviceName);
+                }), instanceInjector = protoInstanceInjector;
+            providerCache['$injector' + providerSuffix] = { $get: valueFn(protoInstanceInjector) };
+            var runBlocks = loadModules(modulesToLoad);
+            instanceInjector = protoInstanceInjector.get('$injector');
+            instanceInjector.strictDi = strictDi;
+            forEach(runBlocks, function (fn) {
+                if (fn)
+                    instanceInjector.invoke(fn);
             });
             return instanceInjector;
             function supportObject(delegate) {
@@ -1517,8 +1954,17 @@ define('angular', [], function () {
                 }
                 return providerCache[name + providerSuffix] = provider_;
             }
-            function factory(name, factoryFn) {
-                return provider(name, { $get: factoryFn });
+            function enforceReturnValue(name, factory) {
+                return function enforcedReturnValue() {
+                    var result = instanceInjector.invoke(factory, this);
+                    if (isUndefined(result)) {
+                        throw $injectorMinErr('undef', 'Provider \'{0}\' must return a value from $get factory method.', name);
+                    }
+                    return result;
+                };
+            }
+            function factory(name, factoryFn, enforce) {
+                return provider(name, { $get: enforce !== false ? enforceReturnValue(name, factoryFn) : factoryFn });
             }
             function service(name, constructor) {
                 return factory(name, [
@@ -1529,7 +1975,7 @@ define('angular', [], function () {
                 ]);
             }
             function value(name, val) {
-                return factory(name, valueFn(val));
+                return factory(name, valueFn(val), false);
             }
             function constant(name, value) {
                 assertNotHasOwnProperty(name, 'constant');
@@ -1544,19 +1990,25 @@ define('angular', [], function () {
                 };
             }
             function loadModules(modulesToLoad) {
-                var runBlocks = [], moduleFn, invokeQueue, i, ii;
+                assertArg(isUndefined(modulesToLoad) || isArray(modulesToLoad), 'modulesToLoad', 'not an array');
+                var runBlocks = [], moduleFn;
                 forEach(modulesToLoad, function (module) {
                     if (loadedModules.get(module))
                         return;
                     loadedModules.put(module, true);
+                    function runInvokeQueue(queue) {
+                        var i, ii;
+                        for (i = 0, ii = queue.length; i < ii; i++) {
+                            var invokeArgs = queue[i], provider = providerInjector.get(invokeArgs[0]);
+                            provider[invokeArgs[1]].apply(provider, invokeArgs[2]);
+                        }
+                    }
                     try {
                         if (isString(module)) {
                             moduleFn = angularModule(module);
                             runBlocks = runBlocks.concat(loadModules(moduleFn.requires)).concat(moduleFn._runBlocks);
-                            for (invokeQueue = moduleFn._invokeQueue, i = 0, ii = invokeQueue.length; i < ii; i++) {
-                                var invokeArgs = invokeQueue[i], provider = providerInjector.get(invokeArgs[0]);
-                                provider[invokeArgs[1]].apply(provider, invokeArgs[2]);
-                            }
+                            runInvokeQueue(moduleFn._invokeQueue);
+                            runInvokeQueue(moduleFn._configBlocks);
                         } else if (isFunction(module)) {
                             runBlocks.push(providerInjector.invoke(module));
                         } else if (isArray(module)) {
@@ -1577,80 +2029,78 @@ define('angular', [], function () {
                 return runBlocks;
             }
             function createInternalInjector(cache, factory) {
-                function getService(serviceName) {
+                function getService(serviceName, caller) {
                     if (cache.hasOwnProperty(serviceName)) {
                         if (cache[serviceName] === INSTANTIATING) {
-                            throw $injectorMinErr('cdep', 'Circular dependency found: {0}', path.join(' <- '));
+                            throw $injectorMinErr('cdep', 'Circular dependency found: {0}', serviceName + ' <- ' + path.join(' <- '));
                         }
                         return cache[serviceName];
                     } else {
                         try {
                             path.unshift(serviceName);
                             cache[serviceName] = INSTANTIATING;
-                            return cache[serviceName] = factory(serviceName);
+                            return cache[serviceName] = factory(serviceName, caller);
+                        } catch (err) {
+                            if (cache[serviceName] === INSTANTIATING) {
+                                delete cache[serviceName];
+                            }
+                            throw err;
                         } finally {
                             path.shift();
                         }
                     }
                 }
-                function invoke(fn, self, locals) {
-                    var args = [], $inject = annotate(fn), length, i, key;
-                    for (i = 0, length = $inject.length; i < length; i++) {
-                        key = $inject[i];
+                function injectionArgs(fn, locals, serviceName) {
+                    var args = [], $inject = createInjector.$$annotate(fn, strictDi, serviceName);
+                    for (var i = 0, length = $inject.length; i < length; i++) {
+                        var key = $inject[i];
                         if (typeof key !== 'string') {
                             throw $injectorMinErr('itkn', 'Incorrect injection token! Expected service name as string, got {0}', key);
                         }
-                        args.push(locals && locals.hasOwnProperty(key) ? locals[key] : getService(key));
+                        args.push(locals && locals.hasOwnProperty(key) ? locals[key] : getService(key, serviceName));
                     }
-                    if (!fn.$inject) {
-                        fn = fn[length];
+                    return args;
+                }
+                function isClass(func) {
+                    if (msie <= 11) {
+                        return false;
                     }
-                    switch (self ? -1 : args.length) {
-                    case 0:
-                        return fn();
-                    case 1:
-                        return fn(args[0]);
-                    case 2:
-                        return fn(args[0], args[1]);
-                    case 3:
-                        return fn(args[0], args[1], args[2]);
-                    case 4:
-                        return fn(args[0], args[1], args[2], args[3]);
-                    case 5:
-                        return fn(args[0], args[1], args[2], args[3], args[4]);
-                    case 6:
-                        return fn(args[0], args[1], args[2], args[3], args[4], args[5]);
-                    case 7:
-                        return fn(args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
-                    case 8:
-                        return fn(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
-                    case 9:
-                        return fn(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8]);
-                    case 10:
-                        return fn(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9]);
-                    default:
+                    return typeof func === 'function' && /^(?:class\s|constructor\()/.test(Function.prototype.toString.call(func));
+                }
+                function invoke(fn, self, locals, serviceName) {
+                    if (typeof locals === 'string') {
+                        serviceName = locals;
+                        locals = null;
+                    }
+                    var args = injectionArgs(fn, locals, serviceName);
+                    if (isArray(fn)) {
+                        fn = fn[fn.length - 1];
+                    }
+                    if (!isClass(fn)) {
                         return fn.apply(self, args);
+                    } else {
+                        args.unshift(null);
+                        return new (Function.prototype.bind.apply(fn, args))();
                     }
                 }
-                function instantiate(Type, locals) {
-                    var Constructor = function () {
-                        }, instance, returnedValue;
-                    Constructor.prototype = (isArray(Type) ? Type[Type.length - 1] : Type).prototype;
-                    instance = new Constructor();
-                    returnedValue = invoke(Type, instance, locals);
-                    return isObject(returnedValue) || isFunction(returnedValue) ? returnedValue : instance;
+                function instantiate(Type, locals, serviceName) {
+                    var ctor = isArray(Type) ? Type[Type.length - 1] : Type;
+                    var args = injectionArgs(Type, locals, serviceName);
+                    args.unshift(null);
+                    return new (Function.prototype.bind.apply(ctor, args))();
                 }
                 return {
                     invoke: invoke,
                     instantiate: instantiate,
                     get: getService,
-                    annotate: annotate,
+                    annotate: createInjector.$$annotate,
                     has: function (name) {
                         return providerCache.hasOwnProperty(name + providerSuffix) || cache.hasOwnProperty(name);
                     }
                 };
             }
         }
+        createInjector.$$annotate = annotate;
         function $AnchorScrollProvider() {
             var autoScrollingEnabled = true;
             this.disableAutoScrolling = function () {
@@ -1664,28 +2114,64 @@ define('angular', [], function () {
                     var document = $window.document;
                     function getFirstAnchor(list) {
                         var result = null;
-                        forEach(list, function (element) {
-                            if (!result && lowercase(element.nodeName) === 'a')
+                        Array.prototype.some.call(list, function (element) {
+                            if (nodeName_(element) === 'a') {
                                 result = element;
+                                return true;
+                            }
                         });
                         return result;
                     }
-                    function scroll() {
-                        var hash = $location.hash(), elm;
+                    function getYOffset() {
+                        var offset = scroll.yOffset;
+                        if (isFunction(offset)) {
+                            offset = offset();
+                        } else if (isElement(offset)) {
+                            var elem = offset[0];
+                            var style = $window.getComputedStyle(elem);
+                            if (style.position !== 'fixed') {
+                                offset = 0;
+                            } else {
+                                offset = elem.getBoundingClientRect().bottom;
+                            }
+                        } else if (!isNumber(offset)) {
+                            offset = 0;
+                        }
+                        return offset;
+                    }
+                    function scrollTo(elem) {
+                        if (elem) {
+                            elem.scrollIntoView();
+                            var offset = getYOffset();
+                            if (offset) {
+                                var elemTop = elem.getBoundingClientRect().top;
+                                $window.scrollBy(0, elemTop - offset);
+                            }
+                        } else {
+                            $window.scrollTo(0, 0);
+                        }
+                    }
+                    function scroll(hash) {
+                        hash = isString(hash) ? hash : $location.hash();
+                        var elm;
                         if (!hash)
-                            $window.scrollTo(0, 0);
+                            scrollTo(null);
                         else if (elm = document.getElementById(hash))
-                            elm.scrollIntoView();
+                            scrollTo(elm);
                         else if (elm = getFirstAnchor(document.getElementsByName(hash)))
-                            elm.scrollIntoView();
+                            scrollTo(elm);
                         else if (hash === 'top')
-                            $window.scrollTo(0, 0);
+                            scrollTo(null);
                     }
                     if (autoScrollingEnabled) {
                         $rootScope.$watch(function autoScrollWatch() {
                             return $location.hash();
-                        }, function autoScrollWatchAction() {
-                            $rootScope.$evalAsync(scroll);
+                        }, function autoScrollWatchAction(newVal, oldVal) {
+                            if (newVal === oldVal && newVal === '')
+                                return;
+                            jqLiteDocumentLoaded(function () {
+                                $rootScope.$evalAsync(scroll);
+                            });
                         });
                     }
                     return scroll;
@@ -1693,61 +2179,436 @@ define('angular', [], function () {
             ];
         }
         var $animateMinErr = minErr('$animate');
+        var ELEMENT_NODE = 1;
+        var NG_ANIMATE_CLASSNAME = 'ng-animate';
+        function mergeClasses(a, b) {
+            if (!a && !b)
+                return '';
+            if (!a)
+                return b;
+            if (!b)
+                return a;
+            if (isArray(a))
+                a = a.join(' ');
+            if (isArray(b))
+                b = b.join(' ');
+            return a + ' ' + b;
+        }
+        function extractElementNode(element) {
+            for (var i = 0; i < element.length; i++) {
+                var elm = element[i];
+                if (elm.nodeType === ELEMENT_NODE) {
+                    return elm;
+                }
+            }
+        }
+        function splitClasses(classes) {
+            if (isString(classes)) {
+                classes = classes.split(' ');
+            }
+            var obj = createMap();
+            forEach(classes, function (klass) {
+                if (klass.length) {
+                    obj[klass] = true;
+                }
+            });
+            return obj;
+        }
+        function prepareAnimateOptions(options) {
+            return isObject(options) ? options : {};
+        }
+        var $$CoreAnimateJsProvider = function () {
+            this.$get = noop;
+        };
+        var $$CoreAnimateQueueProvider = function () {
+            var postDigestQueue = new HashMap();
+            var postDigestElements = [];
+            this.$get = [
+                '$$AnimateRunner',
+                '$rootScope',
+                function ($$AnimateRunner, $rootScope) {
+                    return {
+                        enabled: noop,
+                        on: noop,
+                        off: noop,
+                        pin: noop,
+                        push: function (element, event, options, domOperation) {
+                            domOperation && domOperation();
+                            options = options || {};
+                            options.from && element.css(options.from);
+                            options.to && element.css(options.to);
+                            if (options.addClass || options.removeClass) {
+                                addRemoveClassesPostDigest(element, options.addClass, options.removeClass);
+                            }
+                            var runner = new $$AnimateRunner();
+                            runner.complete();
+                            return runner;
+                        }
+                    };
+                    function updateData(data, classes, value) {
+                        var changed = false;
+                        if (classes) {
+                            classes = isString(classes) ? classes.split(' ') : isArray(classes) ? classes : [];
+                            forEach(classes, function (className) {
+                                if (className) {
+                                    changed = true;
+                                    data[className] = value;
+                                }
+                            });
+                        }
+                        return changed;
+                    }
+                    function handleCSSClassChanges() {
+                        forEach(postDigestElements, function (element) {
+                            var data = postDigestQueue.get(element);
+                            if (data) {
+                                var existing = splitClasses(element.attr('class'));
+                                var toAdd = '';
+                                var toRemove = '';
+                                forEach(data, function (status, className) {
+                                    var hasClass = !!existing[className];
+                                    if (status !== hasClass) {
+                                        if (status) {
+                                            toAdd += (toAdd.length ? ' ' : '') + className;
+                                        } else {
+                                            toRemove += (toRemove.length ? ' ' : '') + className;
+                                        }
+                                    }
+                                });
+                                forEach(element, function (elm) {
+                                    toAdd && jqLiteAddClass(elm, toAdd);
+                                    toRemove && jqLiteRemoveClass(elm, toRemove);
+                                });
+                                postDigestQueue.remove(element);
+                            }
+                        });
+                        postDigestElements.length = 0;
+                    }
+                    function addRemoveClassesPostDigest(element, add, remove) {
+                        var data = postDigestQueue.get(element) || {};
+                        var classesAdded = updateData(data, add, true);
+                        var classesRemoved = updateData(data, remove, false);
+                        if (classesAdded || classesRemoved) {
+                            postDigestQueue.put(element, data);
+                            postDigestElements.push(element);
+                            if (postDigestElements.length === 1) {
+                                $rootScope.$$postDigest(handleCSSClassChanges);
+                            }
+                        }
+                    }
+                }
+            ];
+        };
         var $AnimateProvider = [
             '$provide',
             function ($provide) {
-                this.$$selectors = {};
+                var provider = this;
+                this.$$registeredAnimations = Object.create(null);
                 this.register = function (name, factory) {
-                    var key = name + '-animation';
-                    if (name && name.charAt(0) != '.')
+                    if (name && name.charAt(0) !== '.') {
                         throw $animateMinErr('notcsel', 'Expecting class selector starting with \'.\' got \'{0}\'.', name);
-                    this.$$selectors[name.substr(1)] = key;
+                    }
+                    var key = name + '-animation';
+                    provider.$$registeredAnimations[name.substr(1)] = key;
                     $provide.factory(key, factory);
                 };
+                this.classNameFilter = function (expression) {
+                    if (arguments.length === 1) {
+                        this.$$classNameFilter = expression instanceof RegExp ? expression : null;
+                        if (this.$$classNameFilter) {
+                            var reservedRegex = new RegExp('(\\s+|\\/)' + NG_ANIMATE_CLASSNAME + '(\\s+|\\/)');
+                            if (reservedRegex.test(this.$$classNameFilter.toString())) {
+                                throw $animateMinErr('nongcls', '$animateProvider.classNameFilter(regex) prohibits accepting a regex value which matches/contains the "{0}" CSS class.', NG_ANIMATE_CLASSNAME);
+                            }
+                        }
+                    }
+                    return this.$$classNameFilter;
+                };
                 this.$get = [
-                    '$timeout',
-                    function ($timeout) {
-                        return {
-                            enter: function (element, parent, after, done) {
-                                if (after) {
-                                    after.after(element);
-                                } else {
-                                    if (!parent || !parent[0]) {
-                                        parent = after.parent();
-                                    }
-                                    parent.append(element);
+                    '$$animateQueue',
+                    function ($$animateQueue) {
+                        function domInsert(element, parentElement, afterElement) {
+                            if (afterElement) {
+                                var afterNode = extractElementNode(afterElement);
+                                if (afterNode && !afterNode.parentNode && !afterNode.previousElementSibling) {
+                                    afterElement = null;
                                 }
-                                done && $timeout(done, 0, false);
+                            }
+                            afterElement ? afterElement.after(element) : parentElement.prepend(element);
+                        }
+                        return {
+                            on: $$animateQueue.on,
+                            off: $$animateQueue.off,
+                            pin: $$animateQueue.pin,
+                            enabled: $$animateQueue.enabled,
+                            cancel: function (runner) {
+                                runner.end && runner.end();
                             },
-                            leave: function (element, done) {
-                                element.remove();
-                                done && $timeout(done, 0, false);
+                            enter: function (element, parent, after, options) {
+                                parent = parent && jqLite(parent);
+                                after = after && jqLite(after);
+                                parent = parent || after.parent();
+                                domInsert(element, parent, after);
+                                return $$animateQueue.push(element, 'enter', prepareAnimateOptions(options));
                             },
-                            move: function (element, parent, after, done) {
-                                this.enter(element, parent, after, done);
+                            move: function (element, parent, after, options) {
+                                parent = parent && jqLite(parent);
+                                after = after && jqLite(after);
+                                parent = parent || after.parent();
+                                domInsert(element, parent, after);
+                                return $$animateQueue.push(element, 'move', prepareAnimateOptions(options));
                             },
-                            addClass: function (element, className, done) {
-                                className = isString(className) ? className : isArray(className) ? className.join(' ') : '';
-                                forEach(element, function (element) {
-                                    jqLiteAddClass(element, className);
+                            leave: function (element, options) {
+                                return $$animateQueue.push(element, 'leave', prepareAnimateOptions(options), function () {
+                                    element.remove();
                                 });
-                                done && $timeout(done, 0, false);
                             },
-                            removeClass: function (element, className, done) {
-                                className = isString(className) ? className : isArray(className) ? className.join(' ') : '';
-                                forEach(element, function (element) {
-                                    jqLiteRemoveClass(element, className);
-                                });
-                                done && $timeout(done, 0, false);
+                            addClass: function (element, className, options) {
+                                options = prepareAnimateOptions(options);
+                                options.addClass = mergeClasses(options.addclass, className);
+                                return $$animateQueue.push(element, 'addClass', options);
                             },
-                            enabled: noop
+                            removeClass: function (element, className, options) {
+                                options = prepareAnimateOptions(options);
+                                options.removeClass = mergeClasses(options.removeClass, className);
+                                return $$animateQueue.push(element, 'removeClass', options);
+                            },
+                            setClass: function (element, add, remove, options) {
+                                options = prepareAnimateOptions(options);
+                                options.addClass = mergeClasses(options.addClass, add);
+                                options.removeClass = mergeClasses(options.removeClass, remove);
+                                return $$animateQueue.push(element, 'setClass', options);
+                            },
+                            animate: function (element, from, to, className, options) {
+                                options = prepareAnimateOptions(options);
+                                options.from = options.from ? extend(options.from, from) : from;
+                                options.to = options.to ? extend(options.to, to) : to;
+                                className = className || 'ng-inline-animate';
+                                options.tempClasses = mergeClasses(options.tempClasses, className);
+                                return $$animateQueue.push(element, 'animate', options);
+                            }
                         };
                     }
                 ];
             }
         ];
+        var $$AnimateAsyncRunFactoryProvider = function () {
+            this.$get = [
+                '$$rAF',
+                function ($$rAF) {
+                    var waitQueue = [];
+                    function waitForTick(fn) {
+                        waitQueue.push(fn);
+                        if (waitQueue.length > 1)
+                            return;
+                        $$rAF(function () {
+                            for (var i = 0; i < waitQueue.length; i++) {
+                                waitQueue[i]();
+                            }
+                            waitQueue = [];
+                        });
+                    }
+                    return function () {
+                        var passed = false;
+                        waitForTick(function () {
+                            passed = true;
+                        });
+                        return function (callback) {
+                            passed ? callback() : waitForTick(callback);
+                        };
+                    };
+                }
+            ];
+        };
+        var $$AnimateRunnerFactoryProvider = function () {
+            this.$get = [
+                '$q',
+                '$sniffer',
+                '$$animateAsyncRun',
+                '$document',
+                '$timeout',
+                function ($q, $sniffer, $$animateAsyncRun, $document, $timeout) {
+                    var INITIAL_STATE = 0;
+                    var DONE_PENDING_STATE = 1;
+                    var DONE_COMPLETE_STATE = 2;
+                    AnimateRunner.chain = function (chain, callback) {
+                        var index = 0;
+                        next();
+                        function next() {
+                            if (index === chain.length) {
+                                callback(true);
+                                return;
+                            }
+                            chain[index](function (response) {
+                                if (response === false) {
+                                    callback(false);
+                                    return;
+                                }
+                                index++;
+                                next();
+                            });
+                        }
+                    };
+                    AnimateRunner.all = function (runners, callback) {
+                        var count = 0;
+                        var status = true;
+                        forEach(runners, function (runner) {
+                            runner.done(onProgress);
+                        });
+                        function onProgress(response) {
+                            status = status && response;
+                            if (++count === runners.length) {
+                                callback(status);
+                            }
+                        }
+                    };
+                    function AnimateRunner(host) {
+                        this.setHost(host);
+                        var rafTick = $$animateAsyncRun();
+                        var timeoutTick = function (fn) {
+                            $timeout(fn, 0, false);
+                        };
+                        this._doneCallbacks = [];
+                        this._tick = function (fn) {
+                            var doc = $document[0];
+                            if (doc && doc.hidden) {
+                                timeoutTick(fn);
+                            } else {
+                                rafTick(fn);
+                            }
+                        };
+                        this._state = 0;
+                    }
+                    AnimateRunner.prototype = {
+                        setHost: function (host) {
+                            this.host = host || {};
+                        },
+                        done: function (fn) {
+                            if (this._state === DONE_COMPLETE_STATE) {
+                                fn();
+                            } else {
+                                this._doneCallbacks.push(fn);
+                            }
+                        },
+                        progress: noop,
+                        getPromise: function () {
+                            if (!this.promise) {
+                                var self = this;
+                                this.promise = $q(function (resolve, reject) {
+                                    self.done(function (status) {
+                                        status === false ? reject() : resolve();
+                                    });
+                                });
+                            }
+                            return this.promise;
+                        },
+                        then: function (resolveHandler, rejectHandler) {
+                            return this.getPromise().then(resolveHandler, rejectHandler);
+                        },
+                        'catch': function (handler) {
+                            return this.getPromise()['catch'](handler);
+                        },
+                        'finally': function (handler) {
+                            return this.getPromise()['finally'](handler);
+                        },
+                        pause: function () {
+                            if (this.host.pause) {
+                                this.host.pause();
+                            }
+                        },
+                        resume: function () {
+                            if (this.host.resume) {
+                                this.host.resume();
+                            }
+                        },
+                        end: function () {
+                            if (this.host.end) {
+                                this.host.end();
+                            }
+                            this._resolve(true);
+                        },
+                        cancel: function () {
+                            if (this.host.cancel) {
+                                this.host.cancel();
+                            }
+                            this._resolve(false);
+                        },
+                        complete: function (response) {
+                            var self = this;
+                            if (self._state === INITIAL_STATE) {
+                                self._state = DONE_PENDING_STATE;
+                                self._tick(function () {
+                                    self._resolve(response);
+                                });
+                            }
+                        },
+                        _resolve: function (response) {
+                            if (this._state !== DONE_COMPLETE_STATE) {
+                                forEach(this._doneCallbacks, function (fn) {
+                                    fn(response);
+                                });
+                                this._doneCallbacks.length = 0;
+                                this._state = DONE_COMPLETE_STATE;
+                            }
+                        }
+                    };
+                    return AnimateRunner;
+                }
+            ];
+        };
+        var $CoreAnimateCssProvider = function () {
+            this.$get = [
+                '$$rAF',
+                '$q',
+                '$$AnimateRunner',
+                function ($$rAF, $q, $$AnimateRunner) {
+                    return function (element, initialOptions) {
+                        var options = initialOptions || {};
+                        if (!options.$$prepared) {
+                            options = copy(options);
+                        }
+                        if (options.cleanupStyles) {
+                            options.from = options.to = null;
+                        }
+                        if (options.from) {
+                            element.css(options.from);
+                            options.from = null;
+                        }
+                        var closed, runner = new $$AnimateRunner();
+                        return {
+                            start: run,
+                            end: run
+                        };
+                        function run() {
+                            $$rAF(function () {
+                                applyAnimationContents();
+                                if (!closed) {
+                                    runner.complete();
+                                }
+                                closed = true;
+                            });
+                            return runner;
+                        }
+                        function applyAnimationContents() {
+                            if (options.addClass) {
+                                element.addClass(options.addClass);
+                                options.addClass = null;
+                            }
+                            if (options.removeClass) {
+                                element.removeClass(options.removeClass);
+                                options.removeClass = null;
+                            }
+                            if (options.to) {
+                                element.css(options.to);
+                                options.to = null;
+                            }
+                        }
+                    };
+                }
+            ];
+        };
         function Browser(window, document, $log, $sniffer) {
-            var self = this, rawDocument = document[0], location = window.location, history = window.history, setTimeout = window.setTimeout, clearTimeout = window.clearTimeout, pendingDeferIds = {};
+            var self = this, location = window.location, history = window.history, setTimeout = window.setTimeout, clearTimeout = window.clearTimeout, pendingDeferIds = {};
             self.isMock = false;
             var outstandingRequestCount = 0;
             var outstandingRequestCallbacks = [];
@@ -1771,120 +2632,110 @@ define('angular', [], function () {
                     }
                 }
             }
+            function getHash(url) {
+                var index = url.indexOf('#');
+                return index === -1 ? '' : url.substr(index);
+            }
             self.notifyWhenNoOutstandingRequests = function (callback) {
-                forEach(pollFns, function (pollFn) {
-                    pollFn();
-                });
                 if (outstandingRequestCount === 0) {
                     callback();
                 } else {
                     outstandingRequestCallbacks.push(callback);
                 }
             };
-            var pollFns = [], pollTimeout;
-            self.addPollFn = function (fn) {
-                if (isUndefined(pollTimeout))
-                    startPoller(100, setTimeout);
-                pollFns.push(fn);
-                return fn;
-            };
-            function startPoller(interval, setTimeout) {
-                (function check() {
-                    forEach(pollFns, function (pollFn) {
-                        pollFn();
-                    });
-                    pollTimeout = setTimeout(check, interval);
-                }());
-            }
-            var lastBrowserUrl = location.href, baseElement = document.find('base'), newLocation = null;
-            self.url = function (url, replace) {
+            var cachedState, lastHistoryState, lastBrowserUrl = location.href, baseElement = document.find('base'), pendingLocation = null, getCurrentState = !$sniffer.history ? noop : function getCurrentState() {
+                    try {
+                        return history.state;
+                    } catch (e) {
+                    }
+                };
+            cacheState();
+            lastHistoryState = cachedState;
+            self.url = function (url, replace, state) {
+                if (isUndefined(state)) {
+                    state = null;
+                }
                 if (location !== window.location)
                     location = window.location;
+                if (history !== window.history)
+                    history = window.history;
                 if (url) {
-                    if (lastBrowserUrl == url)
-                        return;
+                    var sameState = lastHistoryState === state;
+                    if (lastBrowserUrl === url && (!$sniffer.history || sameState)) {
+                        return self;
+                    }
+                    var sameBase = lastBrowserUrl && stripHash(lastBrowserUrl) === stripHash(url);
                     lastBrowserUrl = url;
-                    if ($sniffer.history) {
-                        if (replace)
-                            history.replaceState(null, '', url);
-                        else {
-                            history.pushState(null, '', url);
-                            baseElement.attr('href', baseElement.attr('href'));
-                        }
+                    lastHistoryState = state;
+                    if ($sniffer.history && (!sameBase || !sameState)) {
+                        history[replace ? 'replaceState' : 'pushState'](state, '', url);
+                        cacheState();
+                        lastHistoryState = cachedState;
                     } else {
-                        newLocation = url;
+                        if (!sameBase || pendingLocation) {
+                            pendingLocation = url;
+                        }
                         if (replace) {
                             location.replace(url);
-                        } else {
+                        } else if (!sameBase) {
                             location.href = url;
+                        } else {
+                            location.hash = getHash(url);
+                        }
+                        if (location.href !== url) {
+                            pendingLocation = url;
                         }
                     }
                     return self;
                 } else {
-                    return newLocation || location.href.replace(/%27/g, '\'');
+                    return pendingLocation || location.href.replace(/%27/g, '\'');
                 }
             };
+            self.state = function () {
+                return cachedState;
+            };
             var urlChangeListeners = [], urlChangeInit = false;
+            function cacheStateAndFireUrlChange() {
+                pendingLocation = null;
+                cacheState();
+                fireUrlChange();
+            }
+            var lastCachedState = null;
+            function cacheState() {
+                cachedState = getCurrentState();
+                cachedState = isUndefined(cachedState) ? null : cachedState;
+                if (equals(cachedState, lastCachedState)) {
+                    cachedState = lastCachedState;
+                }
+                lastCachedState = cachedState;
+            }
             function fireUrlChange() {
-                newLocation = null;
-                if (lastBrowserUrl == self.url())
+                if (lastBrowserUrl === self.url() && lastHistoryState === cachedState) {
                     return;
+                }
                 lastBrowserUrl = self.url();
+                lastHistoryState = cachedState;
                 forEach(urlChangeListeners, function (listener) {
-                    listener(self.url());
+                    listener(self.url(), cachedState);
                 });
             }
             self.onUrlChange = function (callback) {
                 if (!urlChangeInit) {
                     if ($sniffer.history)
-                        jqLite(window).on('popstate', fireUrlChange);
-                    if ($sniffer.hashchange)
-                        jqLite(window).on('hashchange', fireUrlChange);
-                    else
-                        self.addPollFn(fireUrlChange);
+                        jqLite(window).on('popstate', cacheStateAndFireUrlChange);
+                    jqLite(window).on('hashchange', cacheStateAndFireUrlChange);
                     urlChangeInit = true;
                 }
                 urlChangeListeners.push(callback);
                 return callback;
             };
+            self.$$applicationDestroyed = function () {
+                jqLite(window).off('hashchange popstate', cacheStateAndFireUrlChange);
+            };
+            self.$$checkUrlChange = fireUrlChange;
             self.baseHref = function () {
                 var href = baseElement.attr('href');
-                return href ? href.replace(/^https?\:\/\/[^\/]*/, '') : '';
-            };
-            var lastCookies = {};
-            var lastCookieString = '';
-            var cookiePath = self.baseHref();
-            self.cookies = function (name, value) {
-                var cookieLength, cookieArray, cookie, i, index;
-                if (name) {
-                    if (value === undefined) {
-                        rawDocument.cookie = escape(name) + '=;path=' + cookiePath + ';expires=Thu, 01 Jan 1970 00:00:00 GMT';
-                    } else {
-                        if (isString(value)) {
-                            cookieLength = (rawDocument.cookie = escape(name) + '=' + escape(value) + ';path=' + cookiePath).length + 1;
-                            if (cookieLength > 4096) {
-                                $log.warn('Cookie \'' + name + '\' possibly not set or overflowed because it was too large (' + cookieLength + ' > 4096 bytes)!');
-                            }
-                        }
-                    }
-                } else {
-                    if (rawDocument.cookie !== lastCookieString) {
-                        lastCookieString = rawDocument.cookie;
-                        cookieArray = lastCookieString.split('; ');
-                        lastCookies = {};
-                        for (i = 0; i < cookieArray.length; i++) {
-                            cookie = cookieArray[i];
-                            index = cookie.indexOf('=');
-                            if (index > 0) {
-                                name = unescape(cookie.substring(0, index));
-                                if (lastCookies[name] === undefined) {
-                                    lastCookies[name] = unescape(cookie.substring(index + 1));
-                                }
-                            }
-                        }
-                    }
-                    return lastCookies;
-                }
+                return href ? href.replace(/^(https?\:)?\/\/[^\/]*/, '') : '';
             };
             self.defer = function (fn, delay) {
                 var timeoutId;
@@ -1924,13 +2775,15 @@ define('angular', [], function () {
                     if (cacheId in caches) {
                         throw minErr('$cacheFactory')('iid', 'CacheId \'{0}\' is already taken!', cacheId);
                     }
-                    var size = 0, stats = extend({}, options, { id: cacheId }), data = {}, capacity = options && options.capacity || Number.MAX_VALUE, lruHash = {}, freshEnd = null, staleEnd = null;
+                    var size = 0, stats = extend({}, options, { id: cacheId }), data = createMap(), capacity = options && options.capacity || Number.MAX_VALUE, lruHash = createMap(), freshEnd = null, staleEnd = null;
                     return caches[cacheId] = {
                         put: function (key, value) {
-                            var lruEntry = lruHash[key] || (lruHash[key] = { key: key });
-                            refresh(lruEntry);
                             if (isUndefined(value))
                                 return;
+                            if (capacity < Number.MAX_VALUE) {
+                                var lruEntry = lruHash[key] || (lruHash[key] = { key: key });
+                                refresh(lruEntry);
+                            }
                             if (!(key in data))
                                 size++;
                             data[key] = value;
@@ -1940,29 +2793,35 @@ define('angular', [], function () {
                             return value;
                         },
                         get: function (key) {
-                            var lruEntry = lruHash[key];
-                            if (!lruEntry)
-                                return;
-                            refresh(lruEntry);
+                            if (capacity < Number.MAX_VALUE) {
+                                var lruEntry = lruHash[key];
+                                if (!lruEntry)
+                                    return;
+                                refresh(lruEntry);
+                            }
                             return data[key];
                         },
                         remove: function (key) {
-                            var lruEntry = lruHash[key];
-                            if (!lruEntry)
+                            if (capacity < Number.MAX_VALUE) {
+                                var lruEntry = lruHash[key];
+                                if (!lruEntry)
+                                    return;
+                                if (lruEntry == freshEnd)
+                                    freshEnd = lruEntry.p;
+                                if (lruEntry == staleEnd)
+                                    staleEnd = lruEntry.n;
+                                link(lruEntry.n, lruEntry.p);
+                                delete lruHash[key];
+                            }
+                            if (!(key in data))
                                 return;
-                            if (lruEntry == freshEnd)
-                                freshEnd = lruEntry.p;
-                            if (lruEntry == staleEnd)
-                                staleEnd = lruEntry.n;
-                            link(lruEntry.n, lruEntry.p);
-                            delete lruHash[key];
                             delete data[key];
                             size--;
                         },
                         removeAll: function () {
-                            data = {};
+                            data = createMap();
                             size = 0;
-                            lruHash = {};
+                            lruHash = createMap();
                             freshEnd = staleEnd = null;
                         },
                         destroy: function () {
@@ -2019,16 +2878,81 @@ define('angular', [], function () {
             ];
         }
         var $compileMinErr = minErr('$compile');
+        function UNINITIALIZED_VALUE() {
+        }
+        var _UNINITIALIZED_VALUE = new UNINITIALIZED_VALUE();
         $CompileProvider.$inject = [
             '$provide',
             '$$sanitizeUriProvider'
         ];
         function $CompileProvider($provide, $$sanitizeUriProvider) {
-            var hasDirectives = {}, Suffix = 'Directive', COMMENT_DIRECTIVE_REGEXP = /^\s*directive\:\s*([\d\w\-_]+)\s+(.*)$/, CLASS_DIRECTIVE_REGEXP = /(([\d\w\-_]+)(?:\:([^;]+))?;?)/;
+            var hasDirectives = {}, Suffix = 'Directive', COMMENT_DIRECTIVE_REGEXP = /^\s*directive\:\s*([\w\-]+)\s+(.*)$/, CLASS_DIRECTIVE_REGEXP = /(([\w\-]+)(?:\:([^;]+))?;?)/, ALL_OR_NOTHING_ATTRS = makeMap('ngSrc,ngSrcset,src,srcset'), REQUIRE_PREFIX_REGEXP = /^(?:(\^\^?)?(\?)?(\^\^?)?)?/;
             var EVENT_HANDLER_ATTR_REGEXP = /^(on[a-z]+|formaction)$/;
+            var bindingCache = createMap();
+            function parseIsolateBindings(scope, directiveName, isController) {
+                var LOCAL_REGEXP = /^\s*([@&<]|=(\*?))(\??)\s*(\w*)\s*$/;
+                var bindings = createMap();
+                forEach(scope, function (definition, scopeName) {
+                    if (definition in bindingCache) {
+                        bindings[scopeName] = bindingCache[definition];
+                        return;
+                    }
+                    var match = definition.match(LOCAL_REGEXP);
+                    if (!match) {
+                        throw $compileMinErr('iscp', 'Invalid {3} for directive \'{0}\'.' + ' Definition: {... {1}: \'{2}\' ...}', directiveName, scopeName, definition, isController ? 'controller bindings definition' : 'isolate scope definition');
+                    }
+                    bindings[scopeName] = {
+                        mode: match[1][0],
+                        collection: match[2] === '*',
+                        optional: match[3] === '?',
+                        attrName: match[4] || scopeName
+                    };
+                    if (match[4]) {
+                        bindingCache[definition] = bindings[scopeName];
+                    }
+                });
+                return bindings;
+            }
+            function parseDirectiveBindings(directive, directiveName) {
+                var bindings = {
+                    isolateScope: null,
+                    bindToController: null
+                };
+                if (isObject(directive.scope)) {
+                    if (directive.bindToController === true) {
+                        bindings.bindToController = parseIsolateBindings(directive.scope, directiveName, true);
+                        bindings.isolateScope = {};
+                    } else {
+                        bindings.isolateScope = parseIsolateBindings(directive.scope, directiveName, false);
+                    }
+                }
+                if (isObject(directive.bindToController)) {
+                    bindings.bindToController = parseIsolateBindings(directive.bindToController, directiveName, true);
+                }
+                if (isObject(bindings.bindToController)) {
+                    var controller = directive.controller;
+                    var controllerAs = directive.controllerAs;
+                    if (!controller) {
+                        throw $compileMinErr('noctrl', 'Cannot bind to controller without directive \'{0}\'s controller.', directiveName);
+                    } else if (!identifierForController(controller, controllerAs)) {
+                        throw $compileMinErr('noident', 'Cannot bind to controller without identifier for directive \'{0}\'.', directiveName);
+                    }
+                }
+                return bindings;
+            }
+            function assertValidDirectiveName(name) {
+                var letter = name.charAt(0);
+                if (!letter || letter !== lowercase(letter)) {
+                    throw $compileMinErr('baddir', 'Directive/Component name \'{0}\' is invalid. The first character must be a lowercase letter', name);
+                }
+                if (name !== name.trim()) {
+                    throw $compileMinErr('baddir', 'Directive/Component name \'{0}\' is invalid. The name should not contain leading or trailing whitespaces', name);
+                }
+            }
             this.directive = function registerDirective(name, directiveFactory) {
                 assertNotHasOwnProperty(name, 'directive');
                 if (isString(name)) {
+                    assertValidDirectiveName(name);
                     assertArg(directiveFactory, 'directiveFactory');
                     if (!hasDirectives.hasOwnProperty(name)) {
                         hasDirectives[name] = [];
@@ -2049,7 +2973,8 @@ define('angular', [], function () {
                                         directive.index = index;
                                         directive.name = directive.name || name;
                                         directive.require = directive.require || directive.controller && directive.name;
-                                        directive.restrict = directive.restrict || 'A';
+                                        directive.restrict = directive.restrict || 'EA';
+                                        directive.$$moduleName = directiveFactory.$$moduleName;
                                         directives.push(directive);
                                     } catch (e) {
                                         $exceptionHandler(e);
@@ -2064,6 +2989,50 @@ define('angular', [], function () {
                     forEach(name, reverseParams(registerDirective));
                 }
                 return this;
+            };
+            this.component = function registerComponent(name, options) {
+                var controller = options.controller || function () {
+                };
+                function factory($injector) {
+                    function makeInjectable(fn) {
+                        if (isFunction(fn) || isArray(fn)) {
+                            return function (tElement, tAttrs) {
+                                return $injector.invoke(fn, this, {
+                                    $element: tElement,
+                                    $attrs: tAttrs
+                                });
+                            };
+                        } else {
+                            return fn;
+                        }
+                    }
+                    var template = !options.template && !options.templateUrl ? '' : options.template;
+                    var ddo = {
+                        controller: controller,
+                        controllerAs: identifierForController(options.controller) || options.controllerAs || '$ctrl',
+                        template: makeInjectable(template),
+                        templateUrl: makeInjectable(options.templateUrl),
+                        transclude: options.transclude,
+                        scope: {},
+                        bindToController: options.bindings || {},
+                        restrict: 'E',
+                        require: options.require
+                    };
+                    forEach(options, function (val, key) {
+                        if (key.charAt(0) === '$')
+                            ddo[key] = val;
+                    });
+                    return ddo;
+                }
+                forEach(options, function (val, key) {
+                    if (key.charAt(0) === '$') {
+                        factory[key] = val;
+                        if (isFunction(controller))
+                            controller[key] = val;
+                    }
+                });
+                factory.$inject = ['$injector'];
+                return this.directive(name, factory);
             };
             this.aHrefSanitizationWhitelist = function (regexp) {
                 if (isDefined(regexp)) {
@@ -2081,24 +3050,67 @@ define('angular', [], function () {
                     return $$sanitizeUriProvider.imgSrcSanitizationWhitelist();
                 }
             };
+            var debugInfoEnabled = true;
+            this.debugInfoEnabled = function (enabled) {
+                if (isDefined(enabled)) {
+                    debugInfoEnabled = enabled;
+                    return this;
+                }
+                return debugInfoEnabled;
+            };
+            var TTL = 10;
+            this.onChangesTtl = function (value) {
+                if (arguments.length) {
+                    TTL = value;
+                    return this;
+                }
+                return TTL;
+            };
             this.$get = [
                 '$injector',
                 '$interpolate',
                 '$exceptionHandler',
-                '$http',
-                '$templateCache',
+                '$templateRequest',
                 '$parse',
                 '$controller',
                 '$rootScope',
-                '$document',
                 '$sce',
                 '$animate',
                 '$$sanitizeUri',
-                function ($injector, $interpolate, $exceptionHandler, $http, $templateCache, $parse, $controller, $rootScope, $document, $sce, $animate, $$sanitizeUri) {
-                    var Attributes = function (element, attr) {
+                function ($injector, $interpolate, $exceptionHandler, $templateRequest, $parse, $controller, $rootScope, $sce, $animate, $$sanitizeUri) {
+                    var SIMPLE_ATTR_NAME = /^\w/;
+                    var specialAttrHolder = window.document.createElement('div');
+                    var onChangesTtl = TTL;
+                    var onChangesQueue;
+                    function flushOnChangesQueue() {
+                        try {
+                            if (!--onChangesTtl) {
+                                onChangesQueue = undefined;
+                                throw $compileMinErr('infchng', '{0} $onChanges() iterations reached. Aborting!\n', TTL);
+                            }
+                            $rootScope.$apply(function () {
+                                for (var i = 0, ii = onChangesQueue.length; i < ii; ++i) {
+                                    onChangesQueue[i]();
+                                }
+                                onChangesQueue = undefined;
+                            });
+                        } finally {
+                            onChangesTtl++;
+                        }
+                    }
+                    function Attributes(element, attributesToCopy) {
+                        if (attributesToCopy) {
+                            var keys = Object.keys(attributesToCopy);
+                            var i, l, key;
+                            for (i = 0, l = keys.length; i < l; i++) {
+                                key = keys[i];
+                                this[key] = attributesToCopy[key];
+                            }
+                        } else {
+                            this.$attr = {};
+                        }
                         this.$$element = element;
-                        this.$attr = attr || {};
-                    };
+                    }
                     Attributes.prototype = {
                         $normalize: directiveNormalize,
                         $addClass: function (classVal) {
@@ -2112,14 +3124,23 @@ define('angular', [], function () {
                             }
                         },
                         $updateClass: function (newClasses, oldClasses) {
-                            this.$removeClass(tokenDifference(oldClasses, newClasses));
-                            this.$addClass(tokenDifference(newClasses, oldClasses));
+                            var toAdd = tokenDifference(newClasses, oldClasses);
+                            if (toAdd && toAdd.length) {
+                                $animate.addClass(this.$$element, toAdd);
+                            }
+                            var toRemove = tokenDifference(oldClasses, newClasses);
+                            if (toRemove && toRemove.length) {
+                                $animate.removeClass(this.$$element, toRemove);
+                            }
                         },
                         $set: function (key, value, writeAttr, attrName) {
-                            var booleanKey = getBooleanAttrName(this.$$element[0], key), normalizedVal, nodeName;
+                            var node = this.$$element[0], booleanKey = getBooleanAttrName(node, key), aliasedKey = getAliasedAttrName(key), observer = key, nodeName;
                             if (booleanKey) {
                                 this.$$element.prop(key, value);
                                 attrName = booleanKey;
+                            } else if (aliasedKey) {
+                                this[aliasedKey] = value;
+                                observer = aliasedKey;
                             }
                             this[key] = value;
                             if (attrName) {
@@ -2131,18 +3152,40 @@ define('angular', [], function () {
                                 }
                             }
                             nodeName = nodeName_(this.$$element);
-                            if (nodeName === 'A' && key === 'href' || nodeName === 'IMG' && key === 'src') {
+                            if (nodeName === 'a' && (key === 'href' || key === 'xlinkHref') || nodeName === 'img' && key === 'src') {
                                 this[key] = value = $$sanitizeUri(value, key === 'src');
+                            } else if (nodeName === 'img' && key === 'srcset') {
+                                var result = '';
+                                var trimmedSrcset = trim(value);
+                                var srcPattern = /(\s+\d+x\s*,|\s+\d+w\s*,|\s+,|,\s+)/;
+                                var pattern = /\s/.test(trimmedSrcset) ? srcPattern : /(,)/;
+                                var rawUris = trimmedSrcset.split(pattern);
+                                var nbrUrisWith2parts = Math.floor(rawUris.length / 2);
+                                for (var i = 0; i < nbrUrisWith2parts; i++) {
+                                    var innerIdx = i * 2;
+                                    result += $$sanitizeUri(trim(rawUris[innerIdx]), true);
+                                    result += ' ' + trim(rawUris[innerIdx + 1]);
+                                }
+                                var lastTuple = trim(rawUris[i * 2]).split(/\s/);
+                                result += $$sanitizeUri(trim(lastTuple[0]), true);
+                                if (lastTuple.length === 2) {
+                                    result += ' ' + trim(lastTuple[1]);
+                                }
+                                this[key] = value = result;
                             }
                             if (writeAttr !== false) {
-                                if (value === null || value === undefined) {
+                                if (value === null || isUndefined(value)) {
                                     this.$$element.removeAttr(attrName);
                                 } else {
-                                    this.$$element.attr(attrName, value);
+                                    if (SIMPLE_ATTR_NAME.test(attrName)) {
+                                        this.$$element.attr(attrName, value);
+                                    } else {
+                                        setSpecialAttr(this.$$element[0], attrName, value);
+                                    }
                                 }
                             }
                             var $$observers = this.$$observers;
-                            $$observers && forEach($$observers[key], function (fn) {
+                            $$observers && forEach($$observers[observer], function (fn) {
                                 try {
                                     fn(value);
                                 } catch (e) {
@@ -2151,49 +3194,25 @@ define('angular', [], function () {
                             });
                         },
                         $observe: function (key, fn) {
-                            var attrs = this, $$observers = attrs.$$observers || (attrs.$$observers = {}), listeners = $$observers[key] || ($$observers[key] = []);
+                            var attrs = this, $$observers = attrs.$$observers || (attrs.$$observers = createMap()), listeners = $$observers[key] || ($$observers[key] = []);
                             listeners.push(fn);
                             $rootScope.$evalAsync(function () {
-                                if (!listeners.$$inter) {
+                                if (!listeners.$$inter && attrs.hasOwnProperty(key) && !isUndefined(attrs[key])) {
                                     fn(attrs[key]);
                                 }
                             });
-                            return fn;
+                            return function () {
+                                arrayRemove(listeners, fn);
+                            };
                         }
                     };
-                    var startSymbol = $interpolate.startSymbol(), endSymbol = $interpolate.endSymbol(), denormalizeTemplate = startSymbol == '{{' || endSymbol == '}}' ? identity : function denormalizeTemplate(template) {
-                            return template.replace(/\{\{/g, startSymbol).replace(/}}/g, endSymbol);
-                        }, NG_ATTR_BINDING = /^ngAttr[A-Z]/;
-                    return compile;
-                    function compile($compileNodes, transcludeFn, maxPriority, ignoreDirective, previousCompileContext) {
-                        if (!($compileNodes instanceof jqLite)) {
-                            $compileNodes = jqLite($compileNodes);
-                        }
-                        forEach($compileNodes, function (node, index) {
-                            if (node.nodeType == 3 && node.nodeValue.match(/\S+/)) {
-                                $compileNodes[index] = node = jqLite(node).wrap('<span></span>').parent()[0];
-                            }
-                        });
-                        var compositeLinkFn = compileNodes($compileNodes, transcludeFn, $compileNodes, maxPriority, ignoreDirective, previousCompileContext);
-                        return function publicLinkFn(scope, cloneConnectFn, transcludeControllers) {
-                            assertArg(scope, 'scope');
-                            var $linkNode = cloneConnectFn ? JQLitePrototype.clone.call($compileNodes) : $compileNodes;
-                            forEach(transcludeControllers, function (instance, name) {
-                                $linkNode.data('$' + name + 'Controller', instance);
-                            });
-                            for (var i = 0, ii = $linkNode.length; i < ii; i++) {
-                                var node = $linkNode[i];
-                                if (node.nodeType == 1 || node.nodeType == 9) {
-                                    $linkNode.eq(i).data('$scope', scope);
-                                }
-                            }
-                            safeAddClass($linkNode, 'ng-scope');
-                            if (cloneConnectFn)
-                                cloneConnectFn($linkNode, scope);
-                            if (compositeLinkFn)
-                                compositeLinkFn(scope, $linkNode, $linkNode);
-                            return $linkNode;
-                        };
+                    function setSpecialAttr(element, attrName, value) {
+                        specialAttrHolder.innerHTML = '<span ' + attrName + '>';
+                        var attributes = specialAttrHolder.firstChild.attributes;
+                        var attribute = attributes[0];
+                        attributes.removeNamedItem(attribute.name);
+                        attribute.value = value;
+                        element.attributes.setNamedItem(attribute);
                     }
                     function safeAddClass($element, className) {
                         try {
@@ -2201,97 +3220,211 @@ define('angular', [], function () {
                         } catch (e) {
                         }
                     }
+                    var startSymbol = $interpolate.startSymbol(), endSymbol = $interpolate.endSymbol(), denormalizeTemplate = startSymbol == '{{' && endSymbol == '}}' ? identity : function denormalizeTemplate(template) {
+                            return template.replace(/\{\{/g, startSymbol).replace(/}}/g, endSymbol);
+                        }, NG_ATTR_BINDING = /^ngAttr[A-Z]/;
+                    var MULTI_ELEMENT_DIR_RE = /^(.+)Start$/;
+                    compile.$$addBindingInfo = debugInfoEnabled ? function $$addBindingInfo($element, binding) {
+                        var bindings = $element.data('$binding') || [];
+                        if (isArray(binding)) {
+                            bindings = bindings.concat(binding);
+                        } else {
+                            bindings.push(binding);
+                        }
+                        $element.data('$binding', bindings);
+                    } : noop;
+                    compile.$$addBindingClass = debugInfoEnabled ? function $$addBindingClass($element) {
+                        safeAddClass($element, 'ng-binding');
+                    } : noop;
+                    compile.$$addScopeInfo = debugInfoEnabled ? function $$addScopeInfo($element, scope, isolated, noTemplate) {
+                        var dataName = isolated ? noTemplate ? '$isolateScopeNoTemplate' : '$isolateScope' : '$scope';
+                        $element.data(dataName, scope);
+                    } : noop;
+                    compile.$$addScopeClass = debugInfoEnabled ? function $$addScopeClass($element, isolated) {
+                        safeAddClass($element, isolated ? 'ng-isolate-scope' : 'ng-scope');
+                    } : noop;
+                    compile.$$createComment = function (directiveName, comment) {
+                        var content = '';
+                        if (debugInfoEnabled) {
+                            content = ' ' + (directiveName || '') + ': ' + (comment || '') + ' ';
+                        }
+                        return window.document.createComment(content);
+                    };
+                    return compile;
+                    function compile($compileNodes, transcludeFn, maxPriority, ignoreDirective, previousCompileContext) {
+                        if (!($compileNodes instanceof jqLite)) {
+                            $compileNodes = jqLite($compileNodes);
+                        }
+                        var NOT_EMPTY = /\S+/;
+                        for (var i = 0, len = $compileNodes.length; i < len; i++) {
+                            var domNode = $compileNodes[i];
+                            if (domNode.nodeType === NODE_TYPE_TEXT && domNode.nodeValue.match(NOT_EMPTY)) {
+                                jqLiteWrapNode(domNode, $compileNodes[i] = window.document.createElement('span'));
+                            }
+                        }
+                        var compositeLinkFn = compileNodes($compileNodes, transcludeFn, $compileNodes, maxPriority, ignoreDirective, previousCompileContext);
+                        compile.$$addScopeClass($compileNodes);
+                        var namespace = null;
+                        return function publicLinkFn(scope, cloneConnectFn, options) {
+                            assertArg(scope, 'scope');
+                            if (previousCompileContext && previousCompileContext.needsNewScope) {
+                                scope = scope.$parent.$new();
+                            }
+                            options = options || {};
+                            var parentBoundTranscludeFn = options.parentBoundTranscludeFn, transcludeControllers = options.transcludeControllers, futureParentElement = options.futureParentElement;
+                            if (parentBoundTranscludeFn && parentBoundTranscludeFn.$$boundTransclude) {
+                                parentBoundTranscludeFn = parentBoundTranscludeFn.$$boundTransclude;
+                            }
+                            if (!namespace) {
+                                namespace = detectNamespaceForChildElements(futureParentElement);
+                            }
+                            var $linkNode;
+                            if (namespace !== 'html') {
+                                $linkNode = jqLite(wrapTemplate(namespace, jqLite('<div>').append($compileNodes).html()));
+                            } else if (cloneConnectFn) {
+                                $linkNode = JQLitePrototype.clone.call($compileNodes);
+                            } else {
+                                $linkNode = $compileNodes;
+                            }
+                            if (transcludeControllers) {
+                                for (var controllerName in transcludeControllers) {
+                                    $linkNode.data('$' + controllerName + 'Controller', transcludeControllers[controllerName].instance);
+                                }
+                            }
+                            compile.$$addScopeInfo($linkNode, scope);
+                            if (cloneConnectFn)
+                                cloneConnectFn($linkNode, scope);
+                            if (compositeLinkFn)
+                                compositeLinkFn(scope, $linkNode, $linkNode, parentBoundTranscludeFn);
+                            return $linkNode;
+                        };
+                    }
+                    function detectNamespaceForChildElements(parentElement) {
+                        var node = parentElement && parentElement[0];
+                        if (!node) {
+                            return 'html';
+                        } else {
+                            return nodeName_(node) !== 'foreignobject' && toString.call(node).match(/SVG/) ? 'svg' : 'html';
+                        }
+                    }
                     function compileNodes(nodeList, transcludeFn, $rootElement, maxPriority, ignoreDirective, previousCompileContext) {
-                        var linkFns = [], nodeLinkFn, childLinkFn, directives, attrs, linkFnFound;
+                        var linkFns = [], attrs, directives, nodeLinkFn, childNodes, childLinkFn, linkFnFound, nodeLinkFnFound;
                         for (var i = 0; i < nodeList.length; i++) {
                             attrs = new Attributes();
                             directives = collectDirectives(nodeList[i], [], attrs, i === 0 ? maxPriority : undefined, ignoreDirective);
                             nodeLinkFn = directives.length ? applyDirectivesToNode(directives, nodeList[i], attrs, transcludeFn, $rootElement, null, [], [], previousCompileContext) : null;
-                            childLinkFn = nodeLinkFn && nodeLinkFn.terminal || !nodeList[i].childNodes || !nodeList[i].childNodes.length ? null : compileNodes(nodeList[i].childNodes, nodeLinkFn ? nodeLinkFn.transclude : transcludeFn);
-                            linkFns.push(nodeLinkFn);
-                            linkFns.push(childLinkFn);
-                            linkFnFound = linkFnFound || nodeLinkFn || childLinkFn;
+                            if (nodeLinkFn && nodeLinkFn.scope) {
+                                compile.$$addScopeClass(attrs.$$element);
+                            }
+                            childLinkFn = nodeLinkFn && nodeLinkFn.terminal || !(childNodes = nodeList[i].childNodes) || !childNodes.length ? null : compileNodes(childNodes, nodeLinkFn ? (nodeLinkFn.transcludeOnThisElement || !nodeLinkFn.templateOnThisElement) && nodeLinkFn.transclude : transcludeFn);
+                            if (nodeLinkFn || childLinkFn) {
+                                linkFns.push(i, nodeLinkFn, childLinkFn);
+                                linkFnFound = true;
+                                nodeLinkFnFound = nodeLinkFnFound || nodeLinkFn;
+                            }
                             previousCompileContext = null;
                         }
                         return linkFnFound ? compositeLinkFn : null;
-                        function compositeLinkFn(scope, nodeList, $rootElement, boundTranscludeFn) {
-                            var nodeLinkFn, childLinkFn, node, $node, childScope, childTranscludeFn, i, ii, n;
-                            var stableNodeList = [];
-                            for (i = 0, ii = nodeList.length; i < ii; i++) {
-                                stableNodeList.push(nodeList[i]);
+                        function compositeLinkFn(scope, nodeList, $rootElement, parentBoundTranscludeFn) {
+                            var nodeLinkFn, childLinkFn, node, childScope, i, ii, idx, childBoundTranscludeFn;
+                            var stableNodeList;
+                            if (nodeLinkFnFound) {
+                                var nodeListLength = nodeList.length;
+                                stableNodeList = new Array(nodeListLength);
+                                for (i = 0; i < linkFns.length; i += 3) {
+                                    idx = linkFns[i];
+                                    stableNodeList[idx] = nodeList[idx];
+                                }
+                            } else {
+                                stableNodeList = nodeList;
                             }
-                            for (i = 0, n = 0, ii = linkFns.length; i < ii; n++) {
-                                node = stableNodeList[n];
+                            for (i = 0, ii = linkFns.length; i < ii;) {
+                                node = stableNodeList[linkFns[i++]];
                                 nodeLinkFn = linkFns[i++];
                                 childLinkFn = linkFns[i++];
-                                $node = jqLite(node);
                                 if (nodeLinkFn) {
                                     if (nodeLinkFn.scope) {
                                         childScope = scope.$new();
-                                        $node.data('$scope', childScope);
-                                        safeAddClass($node, 'ng-scope');
+                                        compile.$$addScopeInfo(jqLite(node), childScope);
                                     } else {
                                         childScope = scope;
                                     }
-                                    childTranscludeFn = nodeLinkFn.transclude;
-                                    if (childTranscludeFn || !boundTranscludeFn && transcludeFn) {
-                                        nodeLinkFn(childLinkFn, childScope, node, $rootElement, createBoundTranscludeFn(scope, childTranscludeFn || transcludeFn));
+                                    if (nodeLinkFn.transcludeOnThisElement) {
+                                        childBoundTranscludeFn = createBoundTranscludeFn(scope, nodeLinkFn.transclude, parentBoundTranscludeFn);
+                                    } else if (!nodeLinkFn.templateOnThisElement && parentBoundTranscludeFn) {
+                                        childBoundTranscludeFn = parentBoundTranscludeFn;
+                                    } else if (!parentBoundTranscludeFn && transcludeFn) {
+                                        childBoundTranscludeFn = createBoundTranscludeFn(scope, transcludeFn);
                                     } else {
-                                        nodeLinkFn(childLinkFn, childScope, node, undefined, boundTranscludeFn);
+                                        childBoundTranscludeFn = null;
                                     }
+                                    nodeLinkFn(childLinkFn, childScope, node, $rootElement, childBoundTranscludeFn);
                                 } else if (childLinkFn) {
-                                    childLinkFn(scope, node.childNodes, undefined, boundTranscludeFn);
+                                    childLinkFn(scope, node.childNodes, undefined, parentBoundTranscludeFn);
                                 }
                             }
                         }
                     }
-                    function createBoundTranscludeFn(scope, transcludeFn) {
-                        return function boundTranscludeFn(transcludedScope, cloneFn, controllers) {
-                            var scopeCreated = false;
+                    function createBoundTranscludeFn(scope, transcludeFn, previousBoundTranscludeFn) {
+                        function boundTranscludeFn(transcludedScope, cloneFn, controllers, futureParentElement, containingScope) {
                             if (!transcludedScope) {
-                                transcludedScope = scope.$new();
+                                transcludedScope = scope.$new(false, containingScope);
                                 transcludedScope.$$transcluded = true;
-                                scopeCreated = true;
                             }
-                            var clone = transcludeFn(transcludedScope, cloneFn, controllers);
-                            if (scopeCreated) {
-                                clone.on('$destroy', bind(transcludedScope, transcludedScope.$destroy));
+                            return transcludeFn(transcludedScope, cloneFn, {
+                                parentBoundTranscludeFn: previousBoundTranscludeFn,
+                                transcludeControllers: controllers,
+                                futureParentElement: futureParentElement
+                            });
+                        }
+                        var boundSlots = boundTranscludeFn.$$slots = createMap();
+                        for (var slotName in transcludeFn.$$slots) {
+                            if (transcludeFn.$$slots[slotName]) {
+                                boundSlots[slotName] = createBoundTranscludeFn(scope, transcludeFn.$$slots[slotName], previousBoundTranscludeFn);
+                            } else {
+                                boundSlots[slotName] = null;
                             }
-                            return clone;
-                        };
+                        }
+                        return boundTranscludeFn;
                     }
                     function collectDirectives(node, directives, attrs, maxPriority, ignoreDirective) {
                         var nodeType = node.nodeType, attrsMap = attrs.$attr, match, className;
                         switch (nodeType) {
-                        case 1:
-                            addDirective(directives, directiveNormalize(nodeName_(node).toLowerCase()), 'E', maxPriority, ignoreDirective);
-                            for (var attr, name, nName, ngAttrName, value, nAttrs = node.attributes, j = 0, jj = nAttrs && nAttrs.length; j < jj; j++) {
+                        case NODE_TYPE_ELEMENT:
+                            addDirective(directives, directiveNormalize(nodeName_(node)), 'E', maxPriority, ignoreDirective);
+                            for (var attr, name, nName, ngAttrName, value, isNgAttr, nAttrs = node.attributes, j = 0, jj = nAttrs && nAttrs.length; j < jj; j++) {
                                 var attrStartName = false;
                                 var attrEndName = false;
                                 attr = nAttrs[j];
-                                if (!msie || msie >= 8 || attr.specified) {
-                                    name = attr.name;
-                                    ngAttrName = directiveNormalize(name);
-                                    if (NG_ATTR_BINDING.test(ngAttrName)) {
-                                        name = snake_case(ngAttrName.substr(6), '-');
-                                    }
-                                    var directiveNName = ngAttrName.replace(/(Start|End)$/, '');
-                                    if (ngAttrName === directiveNName + 'Start') {
-                                        attrStartName = name;
-                                        attrEndName = name.substr(0, name.length - 5) + 'end';
-                                        name = name.substr(0, name.length - 6);
-                                    }
-                                    nName = directiveNormalize(name.toLowerCase());
-                                    attrsMap[nName] = name;
-                                    attrs[nName] = value = trim(msie && name == 'href' ? decodeURIComponent(node.getAttribute(name, 2)) : attr.value);
+                                name = attr.name;
+                                value = trim(attr.value);
+                                ngAttrName = directiveNormalize(name);
+                                if (isNgAttr = NG_ATTR_BINDING.test(ngAttrName)) {
+                                    name = name.replace(PREFIX_REGEXP, '').substr(8).replace(/_(.)/g, function (match, letter) {
+                                        return letter.toUpperCase();
+                                    });
+                                }
+                                var multiElementMatch = ngAttrName.match(MULTI_ELEMENT_DIR_RE);
+                                if (multiElementMatch && directiveIsMultiElement(multiElementMatch[1])) {
+                                    attrStartName = name;
+                                    attrEndName = name.substr(0, name.length - 5) + 'end';
+                                    name = name.substr(0, name.length - 6);
+                                }
+                                nName = directiveNormalize(name.toLowerCase());
+                                attrsMap[nName] = name;
+                                if (isNgAttr || !attrs.hasOwnProperty(nName)) {
+                                    attrs[nName] = value;
                                     if (getBooleanAttrName(node, nName)) {
                                         attrs[nName] = true;
                                     }
-                                    addAttrInterpolateDirective(node, directives, value, nName);
-                                    addDirective(directives, nName, 'A', maxPriority, ignoreDirective, attrStartName, attrEndName);
                                 }
+                                addAttrInterpolateDirective(node, directives, value, nName, isNgAttr);
+                                addDirective(directives, nName, 'A', maxPriority, ignoreDirective, attrStartName, attrEndName);
                             }
                             className = node.className;
+                            if (isObject(className)) {
+                                className = className.animVal;
+                            }
                             if (isString(className) && className !== '') {
                                 while (match = CLASS_DIRECTIVE_REGEXP.exec(className)) {
                                     nName = directiveNormalize(match[2]);
@@ -2302,10 +3435,16 @@ define('angular', [], function () {
                                 }
                             }
                             break;
-                        case 3:
+                        case NODE_TYPE_TEXT:
+                            if (msie === 11) {
+                                while (node.parentNode && node.nextSibling && node.nextSibling.nodeType === NODE_TYPE_TEXT) {
+                                    node.nodeValue = node.nodeValue + node.nextSibling.nodeValue;
+                                    node.parentNode.removeChild(node.nextSibling);
+                                }
+                            }
                             addTextInterpolateDirective(directives, node.nodeValue);
                             break;
-                        case 8:
+                        case NODE_TYPE_COMMENT:
                             try {
                                 match = COMMENT_DIRECTIVE_REGEXP.exec(node.nodeValue);
                                 if (match) {
@@ -2325,12 +3464,11 @@ define('angular', [], function () {
                         var nodes = [];
                         var depth = 0;
                         if (attrStart && node.hasAttribute && node.hasAttribute(attrStart)) {
-                            var startNode = node;
                             do {
                                 if (!node) {
                                     throw $compileMinErr('uterdir', 'Unterminated attribute, found \'{0}\' but no matching \'{1}\' found.', attrStart, attrEnd);
                                 }
-                                if (node.nodeType == 1) {
+                                if (node.nodeType == NODE_TYPE_ELEMENT) {
                                     if (node.hasAttribute(attrStart))
                                         depth++;
                                     if (node.hasAttribute(attrEnd))
@@ -2345,14 +3483,27 @@ define('angular', [], function () {
                         return jqLite(nodes);
                     }
                     function groupElementsLinkFnWrapper(linkFn, attrStart, attrEnd) {
-                        return function (scope, element, attrs, controllers, transcludeFn) {
+                        return function groupedElementsLink(scope, element, attrs, controllers, transcludeFn) {
                             element = groupScan(element[0], attrStart, attrEnd);
                             return linkFn(scope, element, attrs, controllers, transcludeFn);
                         };
                     }
+                    function compilationGenerator(eager, $compileNodes, transcludeFn, maxPriority, ignoreDirective, previousCompileContext) {
+                        var compiled;
+                        if (eager) {
+                            return compile($compileNodes, transcludeFn, maxPriority, ignoreDirective, previousCompileContext);
+                        }
+                        return function lazyCompilation() {
+                            if (!compiled) {
+                                compiled = compile($compileNodes, transcludeFn, maxPriority, ignoreDirective, previousCompileContext);
+                                $compileNodes = transcludeFn = previousCompileContext = null;
+                            }
+                            return compiled.apply(this, arguments);
+                        };
+                    }
                     function applyDirectivesToNode(directives, compileNode, templateAttrs, transcludeFn, jqCollection, originalReplaceDirective, preLinkFns, postLinkFns, previousCompileContext) {
                         previousCompileContext = previousCompileContext || {};
-                        var terminalPriority = -Number.MAX_VALUE, newScopeDirective, controllerDirectives = previousCompileContext.controllerDirectives, newIsolateScopeDirective = previousCompileContext.newIsolateScopeDirective, templateDirective = previousCompileContext.templateDirective, nonTlbTranscludeDirective = previousCompileContext.nonTlbTranscludeDirective, hasTranscludeDirective = false, hasElementTranscludeDirective = false, $compileNode = templateAttrs.$$element = jqLite(compileNode), directive, directiveName, $template, replaceDirective = originalReplaceDirective, childTranscludeFn = transcludeFn, linkFn, directiveValue;
+                        var terminalPriority = -Number.MAX_VALUE, newScopeDirective = previousCompileContext.newScopeDirective, controllerDirectives = previousCompileContext.controllerDirectives, newIsolateScopeDirective = previousCompileContext.newIsolateScopeDirective, templateDirective = previousCompileContext.templateDirective, nonTlbTranscludeDirective = previousCompileContext.nonTlbTranscludeDirective, hasTranscludeDirective = false, hasTemplate = false, hasElementTranscludeDirective = previousCompileContext.hasElementTranscludeDirective, $compileNode = templateAttrs.$$element = jqLite(compileNode), directive, directiveName, $template, replaceDirective = originalReplaceDirective, childTranscludeFn = transcludeFn, linkFn, didScanForMultipleTransclusion = false, mightHaveMultipleTransclusionError = false, directiveValue;
                         for (var i = 0, ii = directives.length; i < ii; i++) {
                             directive = directives[i];
                             var attrStart = directive.$$start;
@@ -2365,18 +3516,30 @@ define('angular', [], function () {
                                 break;
                             }
                             if (directiveValue = directive.scope) {
-                                newScopeDirective = newScopeDirective || directive;
                                 if (!directive.templateUrl) {
-                                    assertNoDuplicate('new/isolated scope', newIsolateScopeDirective, directive, $compileNode);
                                     if (isObject(directiveValue)) {
+                                        assertNoDuplicate('new/isolated scope', newIsolateScopeDirective || newScopeDirective, directive, $compileNode);
                                         newIsolateScopeDirective = directive;
+                                    } else {
+                                        assertNoDuplicate('new/isolated scope', newIsolateScopeDirective, directive, $compileNode);
                                     }
                                 }
+                                newScopeDirective = newScopeDirective || directive;
                             }
                             directiveName = directive.name;
+                            if (!didScanForMultipleTransclusion && (directive.replace && (directive.templateUrl || directive.template) || directive.transclude && !directive.$$tlb)) {
+                                var candidateDirective;
+                                for (var scanningIndex = i + 1; candidateDirective = directives[scanningIndex++];) {
+                                    if (candidateDirective.transclude && !candidateDirective.$$tlb || candidateDirective.replace && (candidateDirective.templateUrl || candidateDirective.template)) {
+                                        mightHaveMultipleTransclusionError = true;
+                                        break;
+                                    }
+                                }
+                                didScanForMultipleTransclusion = true;
+                            }
                             if (!directive.templateUrl && directive.controller) {
                                 directiveValue = directive.controller;
-                                controllerDirectives = controllerDirectives || {};
+                                controllerDirectives = controllerDirectives || createMap();
                                 assertNoDuplicate('\'' + directiveName + '\' controller', controllerDirectives[directiveName], directive, $compileNode);
                                 controllerDirectives[directiveName] = directive;
                             }
@@ -2389,35 +3552,75 @@ define('angular', [], function () {
                                 if (directiveValue == 'element') {
                                     hasElementTranscludeDirective = true;
                                     terminalPriority = directive.priority;
-                                    $template = groupScan(compileNode, attrStart, attrEnd);
-                                    $compileNode = templateAttrs.$$element = jqLite(document.createComment(' ' + directiveName + ': ' + templateAttrs[directiveName] + ' '));
+                                    $template = $compileNode;
+                                    $compileNode = templateAttrs.$$element = jqLite(compile.$$createComment(directiveName, templateAttrs[directiveName]));
                                     compileNode = $compileNode[0];
-                                    replaceWith(jqCollection, jqLite(sliceArgs($template)), compileNode);
-                                    childTranscludeFn = compile($template, transcludeFn, terminalPriority, replaceDirective && replaceDirective.name, { nonTlbTranscludeDirective: nonTlbTranscludeDirective });
+                                    replaceWith(jqCollection, sliceArgs($template), compileNode);
+                                    $template[0].$$parentNode = $template[0].parentNode;
+                                    childTranscludeFn = compilationGenerator(mightHaveMultipleTransclusionError, $template, transcludeFn, terminalPriority, replaceDirective && replaceDirective.name, { nonTlbTranscludeDirective: nonTlbTranscludeDirective });
                                 } else {
+                                    var slots = createMap();
                                     $template = jqLite(jqLiteClone(compileNode)).contents();
-                                    $compileNode.html('');
-                                    childTranscludeFn = compile($template, transcludeFn);
+                                    if (isObject(directiveValue)) {
+                                        $template = [];
+                                        var slotMap = createMap();
+                                        var filledSlots = createMap();
+                                        forEach(directiveValue, function (elementSelector, slotName) {
+                                            var optional = elementSelector.charAt(0) === '?';
+                                            elementSelector = optional ? elementSelector.substring(1) : elementSelector;
+                                            slotMap[elementSelector] = slotName;
+                                            slots[slotName] = null;
+                                            filledSlots[slotName] = optional;
+                                        });
+                                        forEach($compileNode.contents(), function (node) {
+                                            var slotName = slotMap[directiveNormalize(nodeName_(node))];
+                                            if (slotName) {
+                                                filledSlots[slotName] = true;
+                                                slots[slotName] = slots[slotName] || [];
+                                                slots[slotName].push(node);
+                                            } else {
+                                                $template.push(node);
+                                            }
+                                        });
+                                        forEach(filledSlots, function (filled, slotName) {
+                                            if (!filled) {
+                                                throw $compileMinErr('reqslot', 'Required transclusion slot `{0}` was not filled.', slotName);
+                                            }
+                                        });
+                                        for (var slotName in slots) {
+                                            if (slots[slotName]) {
+                                                slots[slotName] = compilationGenerator(mightHaveMultipleTransclusionError, slots[slotName], transcludeFn);
+                                            }
+                                        }
+                                    }
+                                    $compileNode.empty();
+                                    childTranscludeFn = compilationGenerator(mightHaveMultipleTransclusionError, $template, transcludeFn, undefined, undefined, { needsNewScope: directive.$$isolateScope || directive.$$newScope });
+                                    childTranscludeFn.$$slots = slots;
                                 }
                             }
                             if (directive.template) {
+                                hasTemplate = true;
                                 assertNoDuplicate('template', templateDirective, directive, $compileNode);
                                 templateDirective = directive;
                                 directiveValue = isFunction(directive.template) ? directive.template($compileNode, templateAttrs) : directive.template;
                                 directiveValue = denormalizeTemplate(directiveValue);
                                 if (directive.replace) {
                                     replaceDirective = directive;
-                                    $template = jqLite('<div>' + trim(directiveValue) + '</div>').contents();
+                                    if (jqLiteIsTextNode(directiveValue)) {
+                                        $template = [];
+                                    } else {
+                                        $template = removeComments(wrapTemplate(directive.templateNamespace, trim(directiveValue)));
+                                    }
                                     compileNode = $template[0];
-                                    if ($template.length != 1 || compileNode.nodeType !== 1) {
+                                    if ($template.length != 1 || compileNode.nodeType !== NODE_TYPE_ELEMENT) {
                                         throw $compileMinErr('tplrt', 'Template for directive \'{0}\' must have exactly one root element. {1}', directiveName, '');
                                     }
                                     replaceWith(jqCollection, $compileNode, compileNode);
                                     var newTemplateAttrs = { $attr: {} };
                                     var templateDirectives = collectDirectives(compileNode, [], newTemplateAttrs);
                                     var unprocessedDirectives = directives.splice(i + 1, directives.length - (i + 1));
-                                    if (newIsolateScopeDirective) {
-                                        markDirectivesAsIsolate(templateDirectives);
+                                    if (newIsolateScopeDirective || newScopeDirective) {
+                                        markDirectiveScope(templateDirectives, newIsolateScopeDirective, newScopeDirective);
                                     }
                                     directives = directives.concat(templateDirectives).concat(unprocessedDirectives);
                                     mergeTemplateAttributes(templateAttrs, newTemplateAttrs);
@@ -2427,13 +3630,15 @@ define('angular', [], function () {
                                 }
                             }
                             if (directive.templateUrl) {
+                                hasTemplate = true;
                                 assertNoDuplicate('template', templateDirective, directive, $compileNode);
                                 templateDirective = directive;
                                 if (directive.replace) {
                                     replaceDirective = directive;
                                 }
-                                nodeLinkFn = compileTemplateUrl(directives.splice(i, directives.length - i), $compileNode, templateAttrs, jqCollection, childTranscludeFn, preLinkFns, postLinkFns, {
+                                nodeLinkFn = compileTemplateUrl(directives.splice(i, directives.length - i), $compileNode, templateAttrs, jqCollection, hasTranscludeDirective && childTranscludeFn, preLinkFns, postLinkFns, {
                                     controllerDirectives: controllerDirectives,
+                                    newScopeDirective: newScopeDirective !== directive && newScopeDirective,
                                     newIsolateScopeDirective: newIsolateScopeDirective,
                                     templateDirective: templateDirective,
                                     nonTlbTranscludeDirective: nonTlbTranscludeDirective
@@ -2457,13 +3662,17 @@ define('angular', [], function () {
                             }
                         }
                         nodeLinkFn.scope = newScopeDirective && newScopeDirective.scope === true;
-                        nodeLinkFn.transclude = hasTranscludeDirective && childTranscludeFn;
+                        nodeLinkFn.transcludeOnThisElement = hasTranscludeDirective;
+                        nodeLinkFn.templateOnThisElement = hasTemplate;
+                        nodeLinkFn.transclude = childTranscludeFn;
+                        previousCompileContext.hasElementTranscludeDirective = hasElementTranscludeDirective;
                         return nodeLinkFn;
                         function addLinkFns(pre, post, attrStart, attrEnd) {
                             if (pre) {
                                 if (attrStart)
                                     pre = groupElementsLinkFnWrapper(pre, attrStart, attrEnd);
                                 pre.require = directive.require;
+                                pre.directiveName = directiveName;
                                 if (newIsolateScopeDirective === directive || directive.$$isolateScope) {
                                     pre = cloneAndAnnotateFn(pre, { isolateScope: true });
                                 }
@@ -2473,133 +3682,87 @@ define('angular', [], function () {
                                 if (attrStart)
                                     post = groupElementsLinkFnWrapper(post, attrStart, attrEnd);
                                 post.require = directive.require;
+                                post.directiveName = directiveName;
                                 if (newIsolateScopeDirective === directive || directive.$$isolateScope) {
                                     post = cloneAndAnnotateFn(post, { isolateScope: true });
                                 }
                                 postLinkFns.push(post);
                             }
                         }
-                        function getControllers(require, $element, elementControllers) {
-                            var value, retrievalMethod = 'data', optional = false;
-                            if (isString(require)) {
-                                while ((value = require.charAt(0)) == '^' || value == '?') {
-                                    require = require.substr(1);
-                                    if (value == '^') {
-                                        retrievalMethod = 'inheritedData';
-                                    }
-                                    optional = optional || value == '?';
-                                }
-                                value = null;
-                                if (elementControllers && retrievalMethod === 'data') {
-                                    value = elementControllers[require];
-                                }
-                                value = value || $element[retrievalMethod]('$' + require + 'Controller');
-                                if (!value && !optional) {
-                                    throw $compileMinErr('ctreq', 'Controller \'{0}\', required by directive \'{1}\', can\'t be found!', require, directiveName);
-                                }
-                                return value;
-                            } else if (isArray(require)) {
-                                value = [];
-                                forEach(require, function (require) {
-                                    value.push(getControllers(require, $element, elementControllers));
-                                });
-                            }
-                            return value;
-                        }
                         function nodeLinkFn(childLinkFn, scope, linkNode, $rootElement, boundTranscludeFn) {
-                            var attrs, $element, i, ii, linkFn, controller, isolateScope, elementControllers = {}, transcludeFn;
+                            var i, ii, linkFn, isolateScope, controllerScope, elementControllers, transcludeFn, $element, attrs, scopeBindingInfo;
                             if (compileNode === linkNode) {
                                 attrs = templateAttrs;
+                                $element = templateAttrs.$$element;
                             } else {
-                                attrs = shallowCopy(templateAttrs, new Attributes(jqLite(linkNode), templateAttrs.$attr));
+                                $element = jqLite(linkNode);
+                                attrs = new Attributes($element, templateAttrs);
                             }
-                            $element = attrs.$$element;
+                            controllerScope = scope;
                             if (newIsolateScopeDirective) {
-                                var LOCAL_REGEXP = /^\s*([@=&])(\??)\s*(\w*)\s*$/;
-                                var $linkNode = jqLite(linkNode);
                                 isolateScope = scope.$new(true);
-                                if (templateDirective && templateDirective === newIsolateScopeDirective.$$originalDirective) {
-                                    $linkNode.data('$isolateScope', isolateScope);
-                                } else {
-                                    $linkNode.data('$isolateScopeNoTemplate', isolateScope);
-                                }
-                                safeAddClass($linkNode, 'ng-isolate-scope');
-                                forEach(newIsolateScopeDirective.scope, function (definition, scopeName) {
-                                    var match = definition.match(LOCAL_REGEXP) || [], attrName = match[3] || scopeName, optional = match[2] == '?', mode = match[1], lastValue, parentGet, parentSet;
-                                    isolateScope.$$isolateBindings[scopeName] = mode + attrName;
-                                    switch (mode) {
-                                    case '@':
-                                        attrs.$observe(attrName, function (value) {
-                                            isolateScope[scopeName] = value;
-                                        });
-                                        attrs.$$observers[attrName].$$scope = scope;
-                                        if (attrs[attrName]) {
-                                            isolateScope[scopeName] = $interpolate(attrs[attrName])(scope);
-                                        }
-                                        break;
-                                    case '=':
-                                        if (optional && !attrs[attrName]) {
-                                            return;
-                                        }
-                                        parentGet = $parse(attrs[attrName]);
-                                        parentSet = parentGet.assign || function () {
-                                            lastValue = isolateScope[scopeName] = parentGet(scope);
-                                            throw $compileMinErr('nonassign', 'Expression \'{0}\' used with directive \'{1}\' is non-assignable!', attrs[attrName], newIsolateScopeDirective.name);
-                                        };
-                                        lastValue = isolateScope[scopeName] = parentGet(scope);
-                                        isolateScope.$watch(function parentValueWatch() {
-                                            var parentValue = parentGet(scope);
-                                            if (parentValue !== isolateScope[scopeName]) {
-                                                if (parentValue !== lastValue) {
-                                                    lastValue = isolateScope[scopeName] = parentValue;
-                                                } else {
-                                                    parentSet(scope, parentValue = lastValue = isolateScope[scopeName]);
-                                                }
-                                            }
-                                            return parentValue;
-                                        });
-                                        break;
-                                    case '&':
-                                        parentGet = $parse(attrs[attrName]);
-                                        isolateScope[scopeName] = function (locals) {
-                                            return parentGet(scope, locals);
-                                        };
-                                        break;
-                                    default:
-                                        throw $compileMinErr('iscp', 'Invalid isolate scope definition for directive \'{0}\'.' + ' Definition: {... {1}: \'{2}\' ...}', newIsolateScopeDirective.name, scopeName, definition);
-                                    }
-                                });
+                            } else if (newScopeDirective) {
+                                controllerScope = scope.$parent;
                             }
-                            transcludeFn = boundTranscludeFn && controllersBoundTransclude;
+                            if (boundTranscludeFn) {
+                                transcludeFn = controllersBoundTransclude;
+                                transcludeFn.$$boundTransclude = boundTranscludeFn;
+                                transcludeFn.isSlotFilled = function (slotName) {
+                                    return !!boundTranscludeFn.$$slots[slotName];
+                                };
+                            }
                             if (controllerDirectives) {
-                                forEach(controllerDirectives, function (directive) {
-                                    var locals = {
-                                            $scope: directive === newIsolateScopeDirective || directive.$$isolateScope ? isolateScope : scope,
-                                            $element: $element,
-                                            $attrs: attrs,
-                                            $transclude: transcludeFn
-                                        }, controllerInstance;
-                                    controller = directive.controller;
-                                    if (controller == '@') {
-                                        controller = attrs[directive.name];
-                                    }
-                                    controllerInstance = $controller(controller, locals);
-                                    elementControllers[directive.name] = controllerInstance;
-                                    if (!hasElementTranscludeDirective) {
-                                        $element.data('$' + directive.name + 'Controller', controllerInstance);
-                                    }
-                                    if (directive.controllerAs) {
-                                        locals.$scope[directive.controllerAs] = controllerInstance;
-                                    }
-                                });
+                                elementControllers = setupControllers($element, attrs, transcludeFn, controllerDirectives, isolateScope, scope, newIsolateScopeDirective);
                             }
-                            for (i = 0, ii = preLinkFns.length; i < ii; i++) {
-                                try {
-                                    linkFn = preLinkFns[i];
-                                    linkFn(linkFn.isolateScope ? isolateScope : scope, $element, attrs, linkFn.require && getControllers(linkFn.require, $element, elementControllers), transcludeFn);
-                                } catch (e) {
-                                    $exceptionHandler(e, startingTag($element));
+                            if (newIsolateScopeDirective) {
+                                compile.$$addScopeInfo($element, isolateScope, true, !(templateDirective && (templateDirective === newIsolateScopeDirective || templateDirective === newIsolateScopeDirective.$$originalDirective)));
+                                compile.$$addScopeClass($element, true);
+                                isolateScope.$$isolateBindings = newIsolateScopeDirective.$$isolateBindings;
+                                scopeBindingInfo = initializeDirectiveBindings(scope, attrs, isolateScope, isolateScope.$$isolateBindings, newIsolateScopeDirective);
+                                if (scopeBindingInfo.removeWatches) {
+                                    isolateScope.$on('$destroy', scopeBindingInfo.removeWatches);
                                 }
+                            }
+                            for (var name in elementControllers) {
+                                var controllerDirective = controllerDirectives[name];
+                                var controller = elementControllers[name];
+                                var bindings = controllerDirective.$$bindings.bindToController;
+                                if (controller.identifier && bindings) {
+                                    controller.bindingInfo = initializeDirectiveBindings(controllerScope, attrs, controller.instance, bindings, controllerDirective);
+                                } else {
+                                    controller.bindingInfo = {};
+                                }
+                                var controllerResult = controller();
+                                if (controllerResult !== controller.instance) {
+                                    controller.instance = controllerResult;
+                                    controller.bindingInfo.removeWatches && controller.bindingInfo.removeWatches();
+                                    controller.bindingInfo = initializeDirectiveBindings(controllerScope, attrs, controller.instance, bindings, controllerDirective);
+                                }
+                                $element.data('$' + controllerDirective.name + 'Controller', controllerResult);
+                            }
+                            forEach(controllerDirectives, function (controllerDirective, name) {
+                                var require = controllerDirective.require;
+                                if (controllerDirective.bindToController && !isArray(require) && isObject(require)) {
+                                    extend(elementControllers[name].instance, getControllers(name, require, $element, elementControllers));
+                                }
+                            });
+                            forEach(elementControllers, function (controller) {
+                                var controllerInstance = controller.instance;
+                                if (isFunction(controllerInstance.$onChanges)) {
+                                    controllerInstance.$onChanges(controller.bindingInfo.initialChanges);
+                                }
+                                if (isFunction(controllerInstance.$onInit)) {
+                                    controllerInstance.$onInit();
+                                }
+                                if (isFunction(controllerInstance.$onDestroy)) {
+                                    controllerScope.$on('$destroy', function callOnDestroyHook() {
+                                        controllerInstance.$onDestroy();
+                                    });
+                                }
+                            });
+                            for (i = 0, ii = preLinkFns.length; i < ii; i++) {
+                                linkFn = preLinkFns[i];
+                                invokeLinkFn(linkFn, linkFn.isolateScope ? isolateScope : scope, $element, attrs, linkFn.require && getControllers(linkFn.directiveName, linkFn.require, $element, elementControllers), transcludeFn);
                             }
                             var scopeToChild = scope;
                             if (newIsolateScopeDirective && (newIsolateScopeDirective.template || newIsolateScopeDirective.templateUrl === null)) {
@@ -2607,29 +3770,99 @@ define('angular', [], function () {
                             }
                             childLinkFn && childLinkFn(scopeToChild, linkNode.childNodes, undefined, boundTranscludeFn);
                             for (i = postLinkFns.length - 1; i >= 0; i--) {
-                                try {
-                                    linkFn = postLinkFns[i];
-                                    linkFn(linkFn.isolateScope ? isolateScope : scope, $element, attrs, linkFn.require && getControllers(linkFn.require, $element, elementControllers), transcludeFn);
-                                } catch (e) {
-                                    $exceptionHandler(e, startingTag($element));
-                                }
+                                linkFn = postLinkFns[i];
+                                invokeLinkFn(linkFn, linkFn.isolateScope ? isolateScope : scope, $element, attrs, linkFn.require && getControllers(linkFn.directiveName, linkFn.require, $element, elementControllers), transcludeFn);
                             }
-                            function controllersBoundTransclude(scope, cloneAttachFn) {
+                            forEach(elementControllers, function (controller) {
+                                var controllerInstance = controller.instance;
+                                if (isFunction(controllerInstance.$postLink)) {
+                                    controllerInstance.$postLink();
+                                }
+                            });
+                            function controllersBoundTransclude(scope, cloneAttachFn, futureParentElement, slotName) {
                                 var transcludeControllers;
-                                if (arguments.length < 2) {
+                                if (!isScope(scope)) {
+                                    slotName = futureParentElement;
+                                    futureParentElement = cloneAttachFn;
                                     cloneAttachFn = scope;
                                     scope = undefined;
                                 }
                                 if (hasElementTranscludeDirective) {
                                     transcludeControllers = elementControllers;
                                 }
-                                return boundTranscludeFn(scope, cloneAttachFn, transcludeControllers);
+                                if (!futureParentElement) {
+                                    futureParentElement = hasElementTranscludeDirective ? $element.parent() : $element;
+                                }
+                                if (slotName) {
+                                    var slotTranscludeFn = boundTranscludeFn.$$slots[slotName];
+                                    if (slotTranscludeFn) {
+                                        return slotTranscludeFn(scope, cloneAttachFn, transcludeControllers, futureParentElement, scopeToChild);
+                                    } else if (isUndefined(slotTranscludeFn)) {
+                                        throw $compileMinErr('noslot', 'No parent directive that requires a transclusion with slot name "{0}". ' + 'Element: {1}', slotName, startingTag($element));
+                                    }
+                                } else {
+                                    return boundTranscludeFn(scope, cloneAttachFn, transcludeControllers, futureParentElement, scopeToChild);
+                                }
                             }
                         }
                     }
-                    function markDirectivesAsIsolate(directives) {
+                    function getControllers(directiveName, require, $element, elementControllers) {
+                        var value;
+                        if (isString(require)) {
+                            var match = require.match(REQUIRE_PREFIX_REGEXP);
+                            var name = require.substring(match[0].length);
+                            var inheritType = match[1] || match[3];
+                            var optional = match[2] === '?';
+                            if (inheritType === '^^') {
+                                $element = $element.parent();
+                            } else {
+                                value = elementControllers && elementControllers[name];
+                                value = value && value.instance;
+                            }
+                            if (!value) {
+                                var dataName = '$' + name + 'Controller';
+                                value = inheritType ? $element.inheritedData(dataName) : $element.data(dataName);
+                            }
+                            if (!value && !optional) {
+                                throw $compileMinErr('ctreq', 'Controller \'{0}\', required by directive \'{1}\', can\'t be found!', name, directiveName);
+                            }
+                        } else if (isArray(require)) {
+                            value = [];
+                            for (var i = 0, ii = require.length; i < ii; i++) {
+                                value[i] = getControllers(directiveName, require[i], $element, elementControllers);
+                            }
+                        } else if (isObject(require)) {
+                            value = {};
+                            forEach(require, function (controller, property) {
+                                value[property] = getControllers(directiveName, controller, $element, elementControllers);
+                            });
+                        }
+                        return value || null;
+                    }
+                    function setupControllers($element, attrs, transcludeFn, controllerDirectives, isolateScope, scope, newIsolateScopeDirective) {
+                        var elementControllers = createMap();
+                        for (var controllerKey in controllerDirectives) {
+                            var directive = controllerDirectives[controllerKey];
+                            var locals = {
+                                $scope: directive === newIsolateScopeDirective || directive.$$isolateScope ? isolateScope : scope,
+                                $element: $element,
+                                $attrs: attrs,
+                                $transclude: transcludeFn
+                            };
+                            var controller = directive.controller;
+                            if (controller == '@') {
+                                controller = attrs[directive.name];
+                            }
+                            elementControllers[directive.name] = $controller(controller, locals, true, directive.controllerAs);
+                        }
+                        return elementControllers;
+                    }
+                    function markDirectiveScope(directives, isolateScope, newScope) {
                         for (var j = 0, jj = directives.length; j < jj; j++) {
-                            directives[j] = inherit(directives[j], { $$isolateScope: true });
+                            directives[j] = inherit(directives[j], {
+                                $$isolateScope: isolateScope,
+                                $$newScope: newScope
+                            });
                         }
                     }
                     function addDirective(tDirectives, name, location, maxPriority, ignoreDirective, startAttrName, endAttrName) {
@@ -2640,12 +3873,18 @@ define('angular', [], function () {
                             for (var directive, directives = $injector.get(name + Suffix), i = 0, ii = directives.length; i < ii; i++) {
                                 try {
                                     directive = directives[i];
-                                    if ((maxPriority === undefined || maxPriority > directive.priority) && directive.restrict.indexOf(location) != -1) {
+                                    if ((isUndefined(maxPriority) || maxPriority > directive.priority) && directive.restrict.indexOf(location) != -1) {
                                         if (startAttrName) {
                                             directive = inherit(directive, {
                                                 $$start: startAttrName,
                                                 $$end: endAttrName
                                             });
+                                        }
+                                        if (!directive.$$bindings) {
+                                            var bindings = directive.$$bindings = parseDirectiveBindings(directive, directive.name);
+                                            if (isObject(bindings.isolateScope)) {
+                                                directive.$$isolateBindings = bindings.isolateScope;
+                                            }
                                         }
                                         tDirectives.push(directive);
                                         match = directive;
@@ -2657,11 +3896,22 @@ define('angular', [], function () {
                         }
                         return match;
                     }
+                    function directiveIsMultiElement(name) {
+                        if (hasDirectives.hasOwnProperty(name)) {
+                            for (var directive, directives = $injector.get(name + Suffix), i = 0, ii = directives.length; i < ii; i++) {
+                                directive = directives[i];
+                                if (directive.multiElement) {
+                                    return true;
+                                }
+                            }
+                        }
+                        return false;
+                    }
                     function mergeTemplateAttributes(dst, src) {
                         var srcAttr = src.$attr, dstAttr = dst.$attr, $element = dst.$$element;
                         forEach(dst, function (value, key) {
                             if (key.charAt(0) != '$') {
-                                if (src[key]) {
+                                if (src[key] && src[key] !== value) {
                                     value += (key === 'style' ? ';' : ' ') + src[key];
                                 }
                                 dst.$set(key, value, true, srcAttr[key]);
@@ -2681,27 +3931,31 @@ define('angular', [], function () {
                         });
                     }
                     function compileTemplateUrl(directives, $compileNode, tAttrs, $rootElement, childTranscludeFn, preLinkFns, postLinkFns, previousCompileContext) {
-                        var linkQueue = [], afterTemplateNodeLinkFn, afterTemplateChildLinkFn, beforeTemplateCompileNode = $compileNode[0], origAsyncDirective = directives.shift(), derivedSyncDirective = extend({}, origAsyncDirective, {
+                        var linkQueue = [], afterTemplateNodeLinkFn, afterTemplateChildLinkFn, beforeTemplateCompileNode = $compileNode[0], origAsyncDirective = directives.shift(), derivedSyncDirective = inherit(origAsyncDirective, {
                                 templateUrl: null,
                                 transclude: null,
                                 replace: null,
                                 $$originalDirective: origAsyncDirective
-                            }), templateUrl = isFunction(origAsyncDirective.templateUrl) ? origAsyncDirective.templateUrl($compileNode, tAttrs) : origAsyncDirective.templateUrl;
-                        $compileNode.html('');
-                        $http.get($sce.getTrustedResourceUrl(templateUrl), { cache: $templateCache }).success(function (content) {
+                            }), templateUrl = isFunction(origAsyncDirective.templateUrl) ? origAsyncDirective.templateUrl($compileNode, tAttrs) : origAsyncDirective.templateUrl, templateNamespace = origAsyncDirective.templateNamespace;
+                        $compileNode.empty();
+                        $templateRequest(templateUrl).then(function (content) {
                             var compileNode, tempTemplateAttrs, $template, childBoundTranscludeFn;
                             content = denormalizeTemplate(content);
                             if (origAsyncDirective.replace) {
-                                $template = jqLite('<div>' + trim(content) + '</div>').contents();
+                                if (jqLiteIsTextNode(content)) {
+                                    $template = [];
+                                } else {
+                                    $template = removeComments(wrapTemplate(templateNamespace, trim(content)));
+                                }
                                 compileNode = $template[0];
-                                if ($template.length != 1 || compileNode.nodeType !== 1) {
+                                if ($template.length != 1 || compileNode.nodeType !== NODE_TYPE_ELEMENT) {
                                     throw $compileMinErr('tplrt', 'Template for directive \'{0}\' must have exactly one root element. {1}', origAsyncDirective.name, templateUrl);
                                 }
                                 tempTemplateAttrs = { $attr: {} };
                                 replaceWith($rootElement, $compileNode, compileNode);
                                 var templateDirectives = collectDirectives(compileNode, [], tempTemplateAttrs);
                                 if (isObject(origAsyncDirective.scope)) {
-                                    markDirectivesAsIsolate(templateDirectives);
+                                    markDirectiveScope(templateDirectives, true);
                                 }
                                 directives = templateDirectives.concat(directives);
                                 mergeTemplateAttributes(tAttrs, tempTemplateAttrs);
@@ -2719,29 +3973,36 @@ define('angular', [], function () {
                             afterTemplateChildLinkFn = compileNodes($compileNode[0].childNodes, childTranscludeFn);
                             while (linkQueue.length) {
                                 var scope = linkQueue.shift(), beforeTemplateLinkNode = linkQueue.shift(), linkRootElement = linkQueue.shift(), boundTranscludeFn = linkQueue.shift(), linkNode = $compileNode[0];
+                                if (scope.$$destroyed)
+                                    continue;
                                 if (beforeTemplateLinkNode !== beforeTemplateCompileNode) {
-                                    linkNode = jqLiteClone(compileNode);
+                                    var oldClasses = beforeTemplateLinkNode.className;
+                                    if (!(previousCompileContext.hasElementTranscludeDirective && origAsyncDirective.replace)) {
+                                        linkNode = jqLiteClone(compileNode);
+                                    }
                                     replaceWith(linkRootElement, jqLite(beforeTemplateLinkNode), linkNode);
+                                    safeAddClass(jqLite(linkNode), oldClasses);
                                 }
-                                if (afterTemplateNodeLinkFn.transclude) {
-                                    childBoundTranscludeFn = createBoundTranscludeFn(scope, afterTemplateNodeLinkFn.transclude);
+                                if (afterTemplateNodeLinkFn.transcludeOnThisElement) {
+                                    childBoundTranscludeFn = createBoundTranscludeFn(scope, afterTemplateNodeLinkFn.transclude, boundTranscludeFn);
                                 } else {
                                     childBoundTranscludeFn = boundTranscludeFn;
                                 }
                                 afterTemplateNodeLinkFn(afterTemplateChildLinkFn, scope, linkNode, $rootElement, childBoundTranscludeFn);
                             }
                             linkQueue = null;
-                        }).error(function (response, code, headers, config) {
-                            throw $compileMinErr('tpload', 'Failed to load template: {0}', config.url);
                         });
                         return function delayedNodeLinkFn(ignoreChildLinkFn, scope, node, rootElement, boundTranscludeFn) {
+                            var childBoundTranscludeFn = boundTranscludeFn;
+                            if (scope.$$destroyed)
+                                return;
                             if (linkQueue) {
-                                linkQueue.push(scope);
-                                linkQueue.push(node);
-                                linkQueue.push(rootElement);
-                                linkQueue.push(boundTranscludeFn);
+                                linkQueue.push(scope, node, rootElement, childBoundTranscludeFn);
                             } else {
-                                afterTemplateNodeLinkFn(afterTemplateChildLinkFn, scope, node, rootElement, boundTranscludeFn);
+                                if (afterTemplateNodeLinkFn.transcludeOnThisElement) {
+                                    childBoundTranscludeFn = createBoundTranscludeFn(scope, afterTemplateNodeLinkFn.transclude, boundTranscludeFn);
+                                }
+                                afterTemplateNodeLinkFn(afterTemplateChildLinkFn, scope, node, rootElement, childBoundTranscludeFn);
                             }
                         };
                     }
@@ -2754,8 +4015,11 @@ define('angular', [], function () {
                         return a.index - b.index;
                     }
                     function assertNoDuplicate(what, previousDirective, directive, element) {
+                        function wrapModuleNameIfDefined(moduleName) {
+                            return moduleName ? ' (module: ' + moduleName + ')' : '';
+                        }
                         if (previousDirective) {
-                            throw $compileMinErr('multidir', 'Multiple directives [{0}, {1}] asking for {2} on: {3}', previousDirective.name, directive.name, what, startingTag(element));
+                            throw $compileMinErr('multidir', 'Multiple directives [{0}{1}, {2}{3}] asking for {4} on: {5}', previousDirective.name, wrapModuleNameIfDefined(previousDirective.$$moduleName), directive.name, wrapModuleNameIfDefined(directive.$$moduleName), what, startingTag(element));
                         }
                     }
                     function addTextInterpolateDirective(directives, text) {
@@ -2763,15 +4027,33 @@ define('angular', [], function () {
                         if (interpolateFn) {
                             directives.push({
                                 priority: 0,
-                                compile: valueFn(function textInterpolateLinkFn(scope, node) {
-                                    var parent = node.parent(), bindings = parent.data('$binding') || [];
-                                    bindings.push(interpolateFn);
-                                    safeAddClass(parent.data('$binding', bindings), 'ng-binding');
-                                    scope.$watch(interpolateFn, function interpolateFnWatchAction(value) {
-                                        node[0].nodeValue = value;
-                                    });
-                                })
+                                compile: function textInterpolateCompileFn(templateNode) {
+                                    var templateNodeParent = templateNode.parent(), hasCompileParent = !!templateNodeParent.length;
+                                    if (hasCompileParent)
+                                        compile.$$addBindingClass(templateNodeParent);
+                                    return function textInterpolateLinkFn(scope, node) {
+                                        var parent = node.parent();
+                                        if (!hasCompileParent)
+                                            compile.$$addBindingClass(parent);
+                                        compile.$$addBindingInfo(parent, interpolateFn.expressions);
+                                        scope.$watch(interpolateFn, function interpolateFnWatchAction(value) {
+                                            node[0].nodeValue = value;
+                                        });
+                                    };
+                                }
                             });
+                        }
+                    }
+                    function wrapTemplate(type, template) {
+                        type = lowercase(type || 'html');
+                        switch (type) {
+                        case 'svg':
+                        case 'math':
+                            var wrapper = window.document.createElement('div');
+                            wrapper.innerHTML = '<' + type + '>' + template + '</' + type + '>';
+                            return wrapper.childNodes[0].childNodes;
+                        default:
+                            return template;
                         }
                     }
                     function getTrustedContext(node, attrNormalizedName) {
@@ -2779,15 +4061,17 @@ define('angular', [], function () {
                             return $sce.HTML;
                         }
                         var tag = nodeName_(node);
-                        if (attrNormalizedName == 'xlinkHref' || tag == 'FORM' && attrNormalizedName == 'action' || tag != 'IMG' && (attrNormalizedName == 'src' || attrNormalizedName == 'ngSrc')) {
+                        if (attrNormalizedName == 'xlinkHref' || tag == 'form' && attrNormalizedName == 'action' || tag != 'img' && (attrNormalizedName == 'src' || attrNormalizedName == 'ngSrc')) {
                             return $sce.RESOURCE_URL;
                         }
                     }
-                    function addAttrInterpolateDirective(node, directives, value, name) {
-                        var interpolateFn = $interpolate(value, true);
+                    function addAttrInterpolateDirective(node, directives, value, name, allOrNothing) {
+                        var trustedContext = getTrustedContext(node, name);
+                        allOrNothing = ALL_OR_NOTHING_ATTRS[name] || allOrNothing;
+                        var interpolateFn = $interpolate(value, true, trustedContext, allOrNothing);
                         if (!interpolateFn)
                             return;
-                        if (name === 'multiple' && nodeName_(node) === 'SELECT') {
+                        if (name === 'multiple' && nodeName_(node) === 'select') {
                             throw $compileMinErr('selmulti', 'Binding to the \'multiple\' attribute is not supported. Element: {0}', startingTag(node));
                         }
                         directives.push({
@@ -2795,11 +4079,15 @@ define('angular', [], function () {
                             compile: function () {
                                 return {
                                     pre: function attrInterpolatePreLinkFn(scope, element, attr) {
-                                        var $$observers = attr.$$observers || (attr.$$observers = {});
+                                        var $$observers = attr.$$observers || (attr.$$observers = createMap());
                                         if (EVENT_HANDLER_ATTR_REGEXP.test(name)) {
                                             throw $compileMinErr('nodomevents', 'Interpolations for HTML DOM event attributes are disallowed.  Please use the ' + 'ng- versions (such as ng-click instead of onclick) instead.');
                                         }
-                                        interpolateFn = $interpolate(attr[name], true, getTrustedContext(node, name));
+                                        var newValue = attr[name];
+                                        if (newValue !== value) {
+                                            interpolateFn = newValue && $interpolate(newValue, true, trustedContext, allOrNothing);
+                                            value = newValue;
+                                        }
                                         if (!interpolateFn)
                                             return;
                                         attr[name] = interpolateFn(scope);
@@ -2830,6 +4118,9 @@ define('angular', [], function () {
                                         }
                                     }
                                     $rootElement.length -= removeCount - 1;
+                                    if ($rootElement.context === firstElementToRemove) {
+                                        $rootElement.context = newNode;
+                                    }
                                     break;
                                 }
                             }
@@ -2837,14 +4128,17 @@ define('angular', [], function () {
                         if (parent) {
                             parent.replaceChild(newNode, firstElementToRemove);
                         }
-                        var fragment = document.createDocumentFragment();
-                        fragment.appendChild(firstElementToRemove);
-                        newNode[jqLite.expando] = firstElementToRemove[jqLite.expando];
-                        for (var k = 1, kk = elementsToRemove.length; k < kk; k++) {
-                            var element = elementsToRemove[k];
-                            jqLite(element).remove();
-                            fragment.appendChild(element);
-                            delete elementsToRemove[k];
+                        var fragment = window.document.createDocumentFragment();
+                        for (i = 0; i < removeCount; i++) {
+                            fragment.appendChild(elementsToRemove[i]);
+                        }
+                        if (jqLite.hasData(firstElementToRemove)) {
+                            jqLite.data(newNode, jqLite.data(firstElementToRemove));
+                            jqLite(firstElementToRemove).off('$destroy');
+                        }
+                        jqLite.cleanData(fragment.querySelectorAll('*'));
+                        for (i = 1; i < removeCount; i++) {
+                            delete elementsToRemove[i];
                         }
                         elementsToRemove[0] = newNode;
                         elementsToRemove.length = 1;
@@ -2854,10 +4148,149 @@ define('angular', [], function () {
                             return fn.apply(null, arguments);
                         }, fn, annotation);
                     }
+                    function invokeLinkFn(linkFn, scope, $element, attrs, controllers, transcludeFn) {
+                        try {
+                            linkFn(scope, $element, attrs, controllers, transcludeFn);
+                        } catch (e) {
+                            $exceptionHandler(e, startingTag($element));
+                        }
+                    }
+                    function initializeDirectiveBindings(scope, attrs, destination, bindings, directive) {
+                        var removeWatchCollection = [];
+                        var initialChanges = {};
+                        var changes;
+                        forEach(bindings, function initializeBinding(definition, scopeName) {
+                            var attrName = definition.attrName, optional = definition.optional, mode = definition.mode, lastValue, parentGet, parentSet, compare, removeWatch;
+                            switch (mode) {
+                            case '@':
+                                if (!optional && !hasOwnProperty.call(attrs, attrName)) {
+                                    destination[scopeName] = attrs[attrName] = void 0;
+                                }
+                                attrs.$observe(attrName, function (value) {
+                                    if (isString(value) || isBoolean(value)) {
+                                        var oldValue = destination[scopeName];
+                                        recordChanges(scopeName, value, oldValue);
+                                        destination[scopeName] = value;
+                                    }
+                                });
+                                attrs.$$observers[attrName].$$scope = scope;
+                                lastValue = attrs[attrName];
+                                if (isString(lastValue)) {
+                                    destination[scopeName] = $interpolate(lastValue)(scope);
+                                } else if (isBoolean(lastValue)) {
+                                    destination[scopeName] = lastValue;
+                                }
+                                initialChanges[scopeName] = new SimpleChange(_UNINITIALIZED_VALUE, destination[scopeName]);
+                                break;
+                            case '=':
+                                if (!hasOwnProperty.call(attrs, attrName)) {
+                                    if (optional)
+                                        break;
+                                    attrs[attrName] = void 0;
+                                }
+                                if (optional && !attrs[attrName])
+                                    break;
+                                parentGet = $parse(attrs[attrName]);
+                                if (parentGet.literal) {
+                                    compare = equals;
+                                } else {
+                                    compare = function simpleCompare(a, b) {
+                                        return a === b || a !== a && b !== b;
+                                    };
+                                }
+                                parentSet = parentGet.assign || function () {
+                                    lastValue = destination[scopeName] = parentGet(scope);
+                                    throw $compileMinErr('nonassign', 'Expression \'{0}\' in attribute \'{1}\' used with directive \'{2}\' is non-assignable!', attrs[attrName], attrName, directive.name);
+                                };
+                                lastValue = destination[scopeName] = parentGet(scope);
+                                var parentValueWatch = function parentValueWatch(parentValue) {
+                                    if (!compare(parentValue, destination[scopeName])) {
+                                        if (!compare(parentValue, lastValue)) {
+                                            destination[scopeName] = parentValue;
+                                        } else {
+                                            parentSet(scope, parentValue = destination[scopeName]);
+                                        }
+                                    }
+                                    return lastValue = parentValue;
+                                };
+                                parentValueWatch.$stateful = true;
+                                if (definition.collection) {
+                                    removeWatch = scope.$watchCollection(attrs[attrName], parentValueWatch);
+                                } else {
+                                    removeWatch = scope.$watch($parse(attrs[attrName], parentValueWatch), null, parentGet.literal);
+                                }
+                                removeWatchCollection.push(removeWatch);
+                                break;
+                            case '<':
+                                if (!hasOwnProperty.call(attrs, attrName)) {
+                                    if (optional)
+                                        break;
+                                    attrs[attrName] = void 0;
+                                }
+                                if (optional && !attrs[attrName])
+                                    break;
+                                parentGet = $parse(attrs[attrName]);
+                                destination[scopeName] = parentGet(scope);
+                                initialChanges[scopeName] = new SimpleChange(_UNINITIALIZED_VALUE, destination[scopeName]);
+                                removeWatch = scope.$watch(parentGet, function parentValueWatchAction(newValue, oldValue) {
+                                    if (newValue === oldValue) {
+                                        oldValue = destination[scopeName];
+                                    }
+                                    recordChanges(scopeName, newValue, oldValue);
+                                    destination[scopeName] = newValue;
+                                }, parentGet.literal);
+                                removeWatchCollection.push(removeWatch);
+                                break;
+                            case '&':
+                                parentGet = attrs.hasOwnProperty(attrName) ? $parse(attrs[attrName]) : noop;
+                                if (parentGet === noop && optional)
+                                    break;
+                                destination[scopeName] = function (locals) {
+                                    return parentGet(scope, locals);
+                                };
+                                break;
+                            }
+                        });
+                        function recordChanges(key, currentValue, previousValue) {
+                            if (isFunction(destination.$onChanges) && currentValue !== previousValue) {
+                                if (!onChangesQueue) {
+                                    scope.$$postDigest(flushOnChangesQueue);
+                                    onChangesQueue = [];
+                                }
+                                if (!changes) {
+                                    changes = {};
+                                    onChangesQueue.push(triggerOnChangesHook);
+                                }
+                                if (changes[key]) {
+                                    previousValue = changes[key].previousValue;
+                                }
+                                changes[key] = new SimpleChange(previousValue, currentValue);
+                            }
+                        }
+                        function triggerOnChangesHook() {
+                            destination.$onChanges(changes);
+                            changes = undefined;
+                        }
+                        return {
+                            initialChanges: initialChanges,
+                            removeWatches: removeWatchCollection.length && function removeWatches() {
+                                for (var i = 0, ii = removeWatchCollection.length; i < ii; ++i) {
+                                    removeWatchCollection[i]();
+                                }
+                            }
+                        };
+                    }
                 }
             ];
         }
-        var PREFIX_REGEXP = /^(x[\:\-_]|data[\:\-_])/i;
+        function SimpleChange(previous, current) {
+            this.previousValue = previous;
+            this.currentValue = current;
+        }
+        SimpleChange.prototype.isFirstChange = function () {
+            return this.previousValue === _UNINITIALIZED_VALUE;
+        };
+        var PREFIX_REGEXP = /^((?:x|data)[\:\-_])/i;
         function directiveNormalize(name) {
             return camelCase(name.replace(PREFIX_REGEXP, ''));
         }
@@ -2878,8 +4311,36 @@ define('angular', [], function () {
                 }
             return values;
         }
+        function removeComments(jqNodes) {
+            jqNodes = jqLite(jqNodes);
+            var i = jqNodes.length;
+            if (i <= 1) {
+                return jqNodes;
+            }
+            while (i--) {
+                var node = jqNodes[i];
+                if (node.nodeType === NODE_TYPE_COMMENT) {
+                    splice.call(jqNodes, i, 1);
+                }
+            }
+            return jqNodes;
+        }
+        var $controllerMinErr = minErr('$controller');
+        var CNTRL_REG = /^(\S+)(\s+as\s+([\w$]+))?$/;
+        function identifierForController(controller, ident) {
+            if (ident && isString(ident))
+                return ident;
+            if (isString(controller)) {
+                var match = CNTRL_REG.exec(controller);
+                if (match)
+                    return match[3];
+            }
+        }
         function $ControllerProvider() {
-            var controllers = {}, CNTRL_REG = /^(\S+)(\s+as\s+(\w+))?$/;
+            var controllers = {}, globals = false;
+            this.has = function (name) {
+                return controllers.hasOwnProperty(name);
+            };
             this.register = function (name, constructor) {
                 assertNotHasOwnProperty(name, 'controller');
                 if (isObject(name)) {
@@ -2888,26 +4349,61 @@ define('angular', [], function () {
                     controllers[name] = constructor;
                 }
             };
+            this.allowGlobals = function () {
+                globals = true;
+            };
             this.$get = [
                 '$injector',
                 '$window',
                 function ($injector, $window) {
-                    return function (expression, locals) {
+                    return function $controller(expression, locals, later, ident) {
                         var instance, match, constructor, identifier;
+                        later = later === true;
+                        if (ident && isString(ident)) {
+                            identifier = ident;
+                        }
                         if (isString(expression)) {
-                            match = expression.match(CNTRL_REG), constructor = match[1], identifier = match[3];
-                            expression = controllers.hasOwnProperty(constructor) ? controllers[constructor] : getter(locals.$scope, constructor, true) || getter($window, constructor, true);
+                            match = expression.match(CNTRL_REG);
+                            if (!match) {
+                                throw $controllerMinErr('ctrlfmt', 'Badly formed controller string \'{0}\'. ' + 'Must match `__name__ as __id__` or `__name__`.', expression);
+                            }
+                            constructor = match[1], identifier = identifier || match[3];
+                            expression = controllers.hasOwnProperty(constructor) ? controllers[constructor] : getter(locals.$scope, constructor, true) || (globals ? getter($window, constructor, true) : undefined);
                             assertArgFn(expression, constructor, true);
                         }
-                        instance = $injector.instantiate(expression, locals);
-                        if (identifier) {
-                            if (!(locals && typeof locals.$scope == 'object')) {
-                                throw minErr('$controller')('noscp', 'Cannot export controller \'{0}\' as \'{1}\'! No $scope object provided via `locals`.', constructor || expression.name, identifier);
+                        if (later) {
+                            var controllerPrototype = (isArray(expression) ? expression[expression.length - 1] : expression).prototype;
+                            instance = Object.create(controllerPrototype || null);
+                            if (identifier) {
+                                addIdentifier(locals, identifier, instance, constructor || expression.name);
                             }
-                            locals.$scope[identifier] = instance;
+                            var instantiate;
+                            return instantiate = extend(function $controllerInit() {
+                                var result = $injector.invoke(expression, instance, locals, constructor);
+                                if (result !== instance && (isObject(result) || isFunction(result))) {
+                                    instance = result;
+                                    if (identifier) {
+                                        addIdentifier(locals, identifier, instance, constructor || expression.name);
+                                    }
+                                }
+                                return instance;
+                            }, {
+                                instance: instance,
+                                identifier: identifier
+                            });
+                        }
+                        instance = $injector.instantiate(expression, locals, constructor);
+                        if (identifier) {
+                            addIdentifier(locals, identifier, instance, constructor || expression.name);
                         }
                         return instance;
                     };
+                    function addIdentifier(locals, identifier, instance, name) {
+                        if (!(locals && isObject(locals.$scope))) {
+                            throw minErr('$controller')('noscp', 'Cannot export controller \'{0}\' as \'{1}\'! No $scope object provided via `locals`.', name, identifier);
+                        }
+                        locals.$scope[identifier] = instance;
+                    }
                 }
             ];
         }
@@ -2929,40 +4425,146 @@ define('angular', [], function () {
                 }
             ];
         }
-        function parseHeaders(headers) {
-            var parsed = {}, key, val, i;
-            if (!headers)
-                return parsed;
-            forEach(headers.split('\n'), function (line) {
-                i = line.indexOf(':');
-                key = lowercase(trim(line.substr(0, i)));
-                val = trim(line.substr(i + 1));
-                if (key) {
-                    if (parsed[key]) {
-                        parsed[key] += ', ' + val;
-                    } else {
-                        parsed[key] = val;
+        var $$ForceReflowProvider = function () {
+            this.$get = [
+                '$document',
+                function ($document) {
+                    return function (domNode) {
+                        if (domNode) {
+                            if (!domNode.nodeType && domNode instanceof jqLite) {
+                                domNode = domNode[0];
+                            }
+                        } else {
+                            domNode = $document[0].body;
+                        }
+                        return domNode.offsetWidth + 1;
+                    };
+                }
+            ];
+        };
+        var APPLICATION_JSON = 'application/json';
+        var CONTENT_TYPE_APPLICATION_JSON = { 'Content-Type': APPLICATION_JSON + ';charset=utf-8' };
+        var JSON_START = /^\[|^\{(?!\{)/;
+        var JSON_ENDS = {
+            '[': /]$/,
+            '{': /}$/
+        };
+        var JSON_PROTECTION_PREFIX = /^\)\]\}',?\n/;
+        var $httpMinErr = minErr('$http');
+        var $httpMinErrLegacyFn = function (method) {
+            return function () {
+                throw $httpMinErr('legacy', 'The method `{0}` on the promise returned from `$http` has been disabled.', method);
+            };
+        };
+        function serializeValue(v) {
+            if (isObject(v)) {
+                return isDate(v) ? v.toISOString() : toJson(v);
+            }
+            return v;
+        }
+        function $HttpParamSerializerProvider() {
+            this.$get = function () {
+                return function ngParamSerializer(params) {
+                    if (!params)
+                        return '';
+                    var parts = [];
+                    forEachSorted(params, function (value, key) {
+                        if (value === null || isUndefined(value))
+                            return;
+                        if (isArray(value)) {
+                            forEach(value, function (v) {
+                                parts.push(encodeUriQuery(key) + '=' + encodeUriQuery(serializeValue(v)));
+                            });
+                        } else {
+                            parts.push(encodeUriQuery(key) + '=' + encodeUriQuery(serializeValue(value)));
+                        }
+                    });
+                    return parts.join('&');
+                };
+            };
+        }
+        function $HttpParamSerializerJQLikeProvider() {
+            this.$get = function () {
+                return function jQueryLikeParamSerializer(params) {
+                    if (!params)
+                        return '';
+                    var parts = [];
+                    serialize(params, '', true);
+                    return parts.join('&');
+                    function serialize(toSerialize, prefix, topLevel) {
+                        if (toSerialize === null || isUndefined(toSerialize))
+                            return;
+                        if (isArray(toSerialize)) {
+                            forEach(toSerialize, function (value, index) {
+                                serialize(value, prefix + '[' + (isObject(value) ? index : '') + ']');
+                            });
+                        } else if (isObject(toSerialize) && !isDate(toSerialize)) {
+                            forEachSorted(toSerialize, function (value, key) {
+                                serialize(value, prefix + (topLevel ? '' : '[') + key + (topLevel ? '' : ']'));
+                            });
+                        } else {
+                            parts.push(encodeUriQuery(prefix) + '=' + encodeUriQuery(serializeValue(toSerialize)));
+                        }
+                    }
+                };
+            };
+        }
+        function defaultHttpResponseTransform(data, headers) {
+            if (isString(data)) {
+                var tempData = data.replace(JSON_PROTECTION_PREFIX, '').trim();
+                if (tempData) {
+                    var contentType = headers('Content-Type');
+                    if (contentType && contentType.indexOf(APPLICATION_JSON) === 0 || isJsonLike(tempData)) {
+                        data = fromJson(tempData);
                     }
                 }
-            });
+            }
+            return data;
+        }
+        function isJsonLike(str) {
+            var jsonStart = str.match(JSON_START);
+            return jsonStart && JSON_ENDS[jsonStart[0]].test(str);
+        }
+        function parseHeaders(headers) {
+            var parsed = createMap(), i;
+            function fillInParsed(key, val) {
+                if (key) {
+                    parsed[key] = parsed[key] ? parsed[key] + ', ' + val : val;
+                }
+            }
+            if (isString(headers)) {
+                forEach(headers.split('\n'), function (line) {
+                    i = line.indexOf(':');
+                    fillInParsed(lowercase(trim(line.substr(0, i))), trim(line.substr(i + 1)));
+                });
+            } else if (isObject(headers)) {
+                forEach(headers, function (headerVal, headerKey) {
+                    fillInParsed(lowercase(headerKey), trim(headerVal));
+                });
+            }
             return parsed;
         }
         function headersGetter(headers) {
-            var headersObj = isObject(headers) ? headers : undefined;
+            var headersObj;
             return function (name) {
                 if (!headersObj)
                     headersObj = parseHeaders(headers);
                 if (name) {
-                    return headersObj[lowercase(name)] || null;
+                    var value = headersObj[lowercase(name)];
+                    if (value === void 0) {
+                        value = null;
+                    }
+                    return value;
                 }
                 return headersObj;
             };
         }
-        function transformData(data, headers, fns) {
-            if (isFunction(fns))
-                return fns(data, headers);
+        function transformData(data, headers, status, fns) {
+            if (isFunction(fns)) {
+                return fns(data, headers, status);
+            }
             forEach(fns, function (fn) {
-                data = fn(data, headers);
+                data = fn(data, headers, status);
             });
             return data;
         }
@@ -2970,71 +4572,72 @@ define('angular', [], function () {
             return 200 <= status && status < 300;
         }
         function $HttpProvider() {
-            var JSON_START = /^\s*(\[|\{[^\{])/, JSON_END = /[\}\]]\s*$/, PROTECTION_PREFIX = /^\)\]\}',?\n/, CONTENT_TYPE_APPLICATION_JSON = { 'Content-Type': 'application/json;charset=utf-8' };
             var defaults = this.defaults = {
-                transformResponse: [function (data) {
-                        if (isString(data)) {
-                            data = data.replace(PROTECTION_PREFIX, '');
-                            if (JSON_START.test(data) && JSON_END.test(data))
-                                data = fromJson(data);
-                        }
-                        return data;
-                    }],
+                transformResponse: [defaultHttpResponseTransform],
                 transformRequest: [function (d) {
-                        return isObject(d) && !isFile(d) ? toJson(d) : d;
+                        return isObject(d) && !isFile(d) && !isBlob(d) && !isFormData(d) ? toJson(d) : d;
                     }],
                 headers: {
                     common: { 'Accept': 'application/json, text/plain, */*' },
-                    post: CONTENT_TYPE_APPLICATION_JSON,
-                    put: CONTENT_TYPE_APPLICATION_JSON,
-                    patch: CONTENT_TYPE_APPLICATION_JSON
+                    post: shallowCopy(CONTENT_TYPE_APPLICATION_JSON),
+                    put: shallowCopy(CONTENT_TYPE_APPLICATION_JSON),
+                    patch: shallowCopy(CONTENT_TYPE_APPLICATION_JSON)
                 },
                 xsrfCookieName: 'XSRF-TOKEN',
-                xsrfHeaderName: 'X-XSRF-TOKEN'
+                xsrfHeaderName: 'X-XSRF-TOKEN',
+                paramSerializer: '$httpParamSerializer'
+            };
+            var useApplyAsync = false;
+            this.useApplyAsync = function (value) {
+                if (isDefined(value)) {
+                    useApplyAsync = !!value;
+                    return this;
+                }
+                return useApplyAsync;
+            };
+            var useLegacyPromise = true;
+            this.useLegacyPromiseExtensions = function (value) {
+                if (isDefined(value)) {
+                    useLegacyPromise = !!value;
+                    return this;
+                }
+                return useLegacyPromise;
             };
             var interceptorFactories = this.interceptors = [];
-            var responseInterceptorFactories = this.responseInterceptors = [];
             this.$get = [
                 '$httpBackend',
-                '$browser',
+                '$$cookieReader',
                 '$cacheFactory',
                 '$rootScope',
                 '$q',
                 '$injector',
-                function ($httpBackend, $browser, $cacheFactory, $rootScope, $q, $injector) {
+                function ($httpBackend, $$cookieReader, $cacheFactory, $rootScope, $q, $injector) {
                     var defaultCache = $cacheFactory('$http');
+                    defaults.paramSerializer = isString(defaults.paramSerializer) ? $injector.get(defaults.paramSerializer) : defaults.paramSerializer;
                     var reversedInterceptors = [];
                     forEach(interceptorFactories, function (interceptorFactory) {
                         reversedInterceptors.unshift(isString(interceptorFactory) ? $injector.get(interceptorFactory) : $injector.invoke(interceptorFactory));
                     });
-                    forEach(responseInterceptorFactories, function (interceptorFactory, index) {
-                        var responseFn = isString(interceptorFactory) ? $injector.get(interceptorFactory) : $injector.invoke(interceptorFactory);
-                        reversedInterceptors.splice(index, 0, {
-                            response: function (response) {
-                                return responseFn($q.when(response));
-                            },
-                            responseError: function (response) {
-                                return responseFn($q.reject(response));
-                            }
-                        });
-                    });
                     function $http(requestConfig) {
-                        var config = {
-                            transformRequest: defaults.transformRequest,
-                            transformResponse: defaults.transformResponse
-                        };
-                        var headers = mergeHeaders(requestConfig);
-                        extend(config, requestConfig);
-                        config.headers = headers;
-                        config.method = uppercase(config.method);
-                        var xsrfValue = urlIsSameOrigin(config.url) ? $browser.cookies()[config.xsrfCookieName || defaults.xsrfCookieName] : undefined;
-                        if (xsrfValue) {
-                            headers[config.xsrfHeaderName || defaults.xsrfHeaderName] = xsrfValue;
+                        if (!isObject(requestConfig)) {
+                            throw minErr('$http')('badreq', 'Http request configuration must be an object.  Received: {0}', requestConfig);
                         }
+                        if (!isString(requestConfig.url)) {
+                            throw minErr('$http')('badreq', 'Http request configuration url must be a string.  Received: {0}', requestConfig.url);
+                        }
+                        var config = extend({
+                            method: 'get',
+                            transformRequest: defaults.transformRequest,
+                            transformResponse: defaults.transformResponse,
+                            paramSerializer: defaults.paramSerializer
+                        }, requestConfig);
+                        config.headers = mergeHeaders(requestConfig);
+                        config.method = uppercase(config.method);
+                        config.paramSerializer = isString(config.paramSerializer) ? $injector.get(config.paramSerializer) : config.paramSerializer;
                         var serverRequest = function (config) {
-                            headers = config.headers;
-                            var reqData = transformData(config.data, headersGetter(headers), config.transformRequest);
-                            if (isUndefined(config.data)) {
+                            var headers = config.headers;
+                            var reqData = transformData(config.data, headersGetter(headers), undefined, config.transformRequest);
+                            if (isUndefined(reqData)) {
                                 forEach(headers, function (value, header) {
                                     if (lowercase(header) === 'content-type') {
                                         delete headers[header];
@@ -3044,7 +4647,7 @@ define('angular', [], function () {
                             if (isUndefined(config.withCredentials) && !isUndefined(defaults.withCredentials)) {
                                 config.withCredentials = defaults.withCredentials;
                             }
-                            return sendReq(config, reqData, headers).then(transformResponse, transformResponse);
+                            return sendReq(config, reqData).then(transformResponse, transformResponse);
                         };
                         var chain = [
                             serverRequest,
@@ -3064,28 +4667,48 @@ define('angular', [], function () {
                             var rejectFn = chain.shift();
                             promise = promise.then(thenFn, rejectFn);
                         }
-                        promise.success = function (fn) {
-                            promise.then(function (response) {
-                                fn(response.data, response.status, response.headers, config);
-                            });
-                            return promise;
-                        };
-                        promise.error = function (fn) {
-                            promise.then(null, function (response) {
-                                fn(response.data, response.status, response.headers, config);
-                            });
-                            return promise;
-                        };
+                        if (useLegacyPromise) {
+                            promise.success = function (fn) {
+                                assertArgFn(fn, 'fn');
+                                promise.then(function (response) {
+                                    fn(response.data, response.status, response.headers, config);
+                                });
+                                return promise;
+                            };
+                            promise.error = function (fn) {
+                                assertArgFn(fn, 'fn');
+                                promise.then(null, function (response) {
+                                    fn(response.data, response.status, response.headers, config);
+                                });
+                                return promise;
+                            };
+                        } else {
+                            promise.success = $httpMinErrLegacyFn('success');
+                            promise.error = $httpMinErrLegacyFn('error');
+                        }
                         return promise;
                         function transformResponse(response) {
-                            var resp = extend({}, response, { data: transformData(response.data, response.headers, config.transformResponse) });
+                            var resp = extend({}, response);
+                            resp.data = transformData(response.data, response.headers, response.status, config.transformResponse);
                             return isSuccess(response.status) ? resp : $q.reject(resp);
+                        }
+                        function executeHeaderFns(headers, config) {
+                            var headerContent, processedHeaders = {};
+                            forEach(headers, function (headerFn, header) {
+                                if (isFunction(headerFn)) {
+                                    headerContent = headerFn(config);
+                                    if (headerContent != null) {
+                                        processedHeaders[header] = headerContent;
+                                    }
+                                } else {
+                                    processedHeaders[header] = headerFn;
+                                }
+                            });
+                            return processedHeaders;
                         }
                         function mergeHeaders(config) {
                             var defHeaders = defaults.headers, reqHeaders = extend({}, config.headers), defHeaderName, lowercaseDefHeaderName, reqHeaderName;
                             defHeaders = extend({}, defHeaders.common, defHeaders[lowercase(config.method)]);
-                            execHeaders(defHeaders);
-                            execHeaders(reqHeaders);
                             defaultHeadersIteration:
                                 for (defHeaderName in defHeaders) {
                                     lowercaseDefHeaderName = lowercase(defHeaderName);
@@ -3096,31 +4719,18 @@ define('angular', [], function () {
                                     }
                                     reqHeaders[defHeaderName] = defHeaders[defHeaderName];
                                 }
-                            return reqHeaders;
-                            function execHeaders(headers) {
-                                var headerContent;
-                                forEach(headers, function (headerFn, header) {
-                                    if (isFunction(headerFn)) {
-                                        headerContent = headerFn();
-                                        if (headerContent != null) {
-                                            headers[header] = headerContent;
-                                        } else {
-                                            delete headers[header];
-                                        }
-                                    }
-                                });
-                            }
+                            return executeHeaderFns(reqHeaders, shallowCopy(config));
                         }
                     }
                     $http.pendingRequests = [];
                     createShortMethods('get', 'delete', 'head', 'jsonp');
-                    createShortMethodsWithData('post', 'put');
+                    createShortMethodsWithData('post', 'put', 'patch');
                     $http.defaults = defaults;
                     return $http;
                     function createShortMethods(names) {
                         forEach(arguments, function (name) {
                             $http[name] = function (url, config) {
-                                return $http(extend(config || {}, {
+                                return $http(extend({}, config || {}, {
                                     method: name,
                                     url: url
                                 }));
@@ -3130,7 +4740,7 @@ define('angular', [], function () {
                     function createShortMethodsWithData(name) {
                         forEach(arguments, function (name) {
                             $http[name] = function (url, data, config) {
-                                return $http(extend(config || {}, {
+                                return $http(extend({}, config || {}, {
                                     method: name,
                                     url: url,
                                     data: data
@@ -3138,24 +4748,23 @@ define('angular', [], function () {
                             };
                         });
                     }
-                    function sendReq(config, reqData, reqHeaders) {
-                        var deferred = $q.defer(), promise = deferred.promise, cache, cachedResp, url = buildUrl(config.url, config.params);
+                    function sendReq(config, reqData) {
+                        var deferred = $q.defer(), promise = deferred.promise, cache, cachedResp, reqHeaders = config.headers, url = buildUrl(config.url, config.paramSerializer(config.params));
                         $http.pendingRequests.push(config);
                         promise.then(removePendingReq, removePendingReq);
-                        if ((config.cache || defaults.cache) && config.cache !== false && config.method == 'GET') {
+                        if ((config.cache || defaults.cache) && config.cache !== false && (config.method === 'GET' || config.method === 'JSONP')) {
                             cache = isObject(config.cache) ? config.cache : isObject(defaults.cache) ? defaults.cache : defaultCache;
                         }
                         if (cache) {
                             cachedResp = cache.get(url);
                             if (isDefined(cachedResp)) {
-                                if (cachedResp.then) {
-                                    cachedResp.then(removePendingReq, removePendingReq);
-                                    return cachedResp;
+                                if (isPromiseLike(cachedResp)) {
+                                    cachedResp.then(resolvePromiseWithResult, resolvePromiseWithResult);
                                 } else {
                                     if (isArray(cachedResp)) {
-                                        resolvePromise(cachedResp[1], cachedResp[0], copy(cachedResp[2]));
+                                        resolvePromise(cachedResp[1], cachedResp[0], shallowCopy(cachedResp[2]), cachedResp[3]);
                                     } else {
-                                        resolvePromise(cachedResp, 200, {});
+                                        resolvePromise(cachedResp, 200, {}, 'OK');
                                     }
                                 }
                             } else {
@@ -3163,176 +4772,210 @@ define('angular', [], function () {
                             }
                         }
                         if (isUndefined(cachedResp)) {
-                            $httpBackend(config.method, url, reqData, done, reqHeaders, config.timeout, config.withCredentials, config.responseType);
+                            var xsrfValue = urlIsSameOrigin(config.url) ? $$cookieReader()[config.xsrfCookieName || defaults.xsrfCookieName] : undefined;
+                            if (xsrfValue) {
+                                reqHeaders[config.xsrfHeaderName || defaults.xsrfHeaderName] = xsrfValue;
+                            }
+                            $httpBackend(config.method, url, reqData, done, reqHeaders, config.timeout, config.withCredentials, config.responseType, createApplyHandlers(config.eventHandlers), createApplyHandlers(config.uploadEventHandlers));
                         }
                         return promise;
-                        function done(status, response, headersString) {
+                        function createApplyHandlers(eventHandlers) {
+                            if (eventHandlers) {
+                                var applyHandlers = {};
+                                forEach(eventHandlers, function (eventHandler, key) {
+                                    applyHandlers[key] = function () {
+                                        if (useApplyAsync) {
+                                            $rootScope.$applyAsync(eventHandler);
+                                        } else if ($rootScope.$$phase) {
+                                            eventHandler();
+                                        } else {
+                                            $rootScope.$apply(eventHandler);
+                                        }
+                                    };
+                                });
+                                return applyHandlers;
+                            }
+                        }
+                        function done(status, response, headersString, statusText) {
                             if (cache) {
                                 if (isSuccess(status)) {
                                     cache.put(url, [
                                         status,
                                         response,
-                                        parseHeaders(headersString)
+                                        parseHeaders(headersString),
+                                        statusText
                                     ]);
                                 } else {
                                     cache.remove(url);
                                 }
                             }
-                            resolvePromise(response, status, headersString);
-                            if (!$rootScope.$$phase)
-                                $rootScope.$apply();
+                            function resolveHttpPromise() {
+                                resolvePromise(response, status, headersString, statusText);
+                            }
+                            if (useApplyAsync) {
+                                $rootScope.$applyAsync(resolveHttpPromise);
+                            } else {
+                                resolveHttpPromise();
+                                if (!$rootScope.$$phase)
+                                    $rootScope.$apply();
+                            }
                         }
-                        function resolvePromise(response, status, headers) {
-                            status = Math.max(status, 0);
+                        function resolvePromise(response, status, headers, statusText) {
+                            status = status >= -1 ? status : 0;
                             (isSuccess(status) ? deferred.resolve : deferred.reject)({
                                 data: response,
                                 status: status,
                                 headers: headersGetter(headers),
-                                config: config
+                                config: config,
+                                statusText: statusText
                             });
                         }
+                        function resolvePromiseWithResult(result) {
+                            resolvePromise(result.data, result.status, shallowCopy(result.headers()), result.statusText);
+                        }
                         function removePendingReq() {
-                            var idx = indexOf($http.pendingRequests, config);
+                            var idx = $http.pendingRequests.indexOf(config);
                             if (idx !== -1)
                                 $http.pendingRequests.splice(idx, 1);
                         }
                     }
-                    function buildUrl(url, params) {
-                        if (!params)
-                            return url;
-                        var parts = [];
-                        forEachSorted(params, function (value, key) {
-                            if (value === null || isUndefined(value))
-                                return;
-                            if (!isArray(value))
-                                value = [value];
-                            forEach(value, function (v) {
-                                if (isObject(v)) {
-                                    v = toJson(v);
-                                }
-                                parts.push(encodeUriQuery(key) + '=' + encodeUriQuery(v));
-                            });
-                        });
-                        return url + (url.indexOf('?') == -1 ? '?' : '&') + parts.join('&');
+                    function buildUrl(url, serializedParams) {
+                        if (serializedParams.length > 0) {
+                            url += (url.indexOf('?') == -1 ? '?' : '&') + serializedParams;
+                        }
+                        return url;
                     }
                 }
             ];
         }
-        var XHR = window.XMLHttpRequest || function () {
-            try {
-                return new ActiveXObject('Msxml2.XMLHTTP.6.0');
-            } catch (e1) {
-            }
-            try {
-                return new ActiveXObject('Msxml2.XMLHTTP.3.0');
-            } catch (e2) {
-            }
-            try {
-                return new ActiveXObject('Msxml2.XMLHTTP');
-            } catch (e3) {
-            }
-            throw minErr('$httpBackend')('noxhr', 'This browser does not support XMLHttpRequest.');
-        };
+        function $xhrFactoryProvider() {
+            this.$get = function () {
+                return function createXhr() {
+                    return new window.XMLHttpRequest();
+                };
+            };
+        }
         function $HttpBackendProvider() {
             this.$get = [
                 '$browser',
                 '$window',
                 '$document',
-                function ($browser, $window, $document) {
-                    return createHttpBackend($browser, XHR, $browser.defer, $window.angular.callbacks, $document[0]);
+                '$xhrFactory',
+                function ($browser, $window, $document, $xhrFactory) {
+                    return createHttpBackend($browser, $xhrFactory, $browser.defer, $window.angular.callbacks, $document[0]);
                 }
             ];
         }
-        function createHttpBackend($browser, XHR, $browserDefer, callbacks, rawDocument) {
-            var ABORTED = -1;
-            return function (method, url, post, callback, headers, timeout, withCredentials, responseType) {
-                var status;
+        function createHttpBackend($browser, createXhr, $browserDefer, callbacks, rawDocument) {
+            return function (method, url, post, callback, headers, timeout, withCredentials, responseType, eventHandlers, uploadEventHandlers) {
                 $browser.$$incOutstandingRequestCount();
                 url = url || $browser.url();
                 if (lowercase(method) == 'jsonp') {
                     var callbackId = '_' + (callbacks.counter++).toString(36);
                     callbacks[callbackId] = function (data) {
                         callbacks[callbackId].data = data;
+                        callbacks[callbackId].called = true;
                     };
-                    var jsonpDone = jsonpReq(url.replace('JSON_CALLBACK', 'angular.callbacks.' + callbackId), function () {
-                        if (callbacks[callbackId].data) {
-                            completeRequest(callback, 200, callbacks[callbackId].data);
-                        } else {
-                            completeRequest(callback, status || -2);
-                        }
-                        delete callbacks[callbackId];
+                    var jsonpDone = jsonpReq(url.replace('JSON_CALLBACK', 'angular.callbacks.' + callbackId), callbackId, function (status, text) {
+                        completeRequest(callback, status, callbacks[callbackId].data, '', text);
+                        callbacks[callbackId] = noop;
                     });
                 } else {
-                    var xhr = new XHR();
+                    var xhr = createXhr(method, url);
                     xhr.open(method, url, true);
                     forEach(headers, function (value, key) {
                         if (isDefined(value)) {
                             xhr.setRequestHeader(key, value);
                         }
                     });
-                    xhr.onreadystatechange = function () {
-                        if (xhr.readyState == 4) {
-                            var responseHeaders = null, response = null;
-                            if (status !== ABORTED) {
-                                responseHeaders = xhr.getAllResponseHeaders();
-                                response = xhr.responseType ? xhr.response : xhr.responseText;
-                            }
-                            completeRequest(callback, status || xhr.status, response, responseHeaders);
+                    xhr.onload = function requestLoaded() {
+                        var statusText = xhr.statusText || '';
+                        var response = 'response' in xhr ? xhr.response : xhr.responseText;
+                        var status = xhr.status === 1223 ? 204 : xhr.status;
+                        if (status === 0) {
+                            status = response ? 200 : urlResolve(url).protocol == 'file' ? 404 : 0;
                         }
+                        completeRequest(callback, status, response, xhr.getAllResponseHeaders(), statusText);
                     };
+                    var requestError = function () {
+                        completeRequest(callback, -1, null, null, '');
+                    };
+                    xhr.onerror = requestError;
+                    xhr.onabort = requestError;
+                    forEach(eventHandlers, function (value, key) {
+                        xhr.addEventListener(key, value);
+                    });
+                    forEach(uploadEventHandlers, function (value, key) {
+                        xhr.upload.addEventListener(key, value);
+                    });
                     if (withCredentials) {
                         xhr.withCredentials = true;
                     }
                     if (responseType) {
-                        xhr.responseType = responseType;
+                        try {
+                            xhr.responseType = responseType;
+                        } catch (e) {
+                            if (responseType !== 'json') {
+                                throw e;
+                            }
+                        }
                     }
-                    xhr.send(post || null);
+                    xhr.send(isUndefined(post) ? null : post);
                 }
                 if (timeout > 0) {
                     var timeoutId = $browserDefer(timeoutRequest, timeout);
-                } else if (timeout && timeout.then) {
+                } else if (isPromiseLike(timeout)) {
                     timeout.then(timeoutRequest);
                 }
                 function timeoutRequest() {
-                    status = ABORTED;
                     jsonpDone && jsonpDone();
                     xhr && xhr.abort();
                 }
-                function completeRequest(callback, status, response, headersString) {
-                    var protocol = urlResolve(url).protocol;
-                    timeoutId && $browserDefer.cancel(timeoutId);
+                function completeRequest(callback, status, response, headersString, statusText) {
+                    if (isDefined(timeoutId)) {
+                        $browserDefer.cancel(timeoutId);
+                    }
                     jsonpDone = xhr = null;
-                    status = protocol == 'file' && status === 0 ? response ? 200 : 404 : status;
-                    status = status == 1223 ? 204 : status;
-                    callback(status, response, headersString);
+                    callback(status, response, headersString, statusText);
                     $browser.$$completeOutstandingRequest(noop);
                 }
             };
-            function jsonpReq(url, done) {
-                var script = rawDocument.createElement('script'), doneWrapper = function () {
-                        script.onreadystatechange = script.onload = script.onerror = null;
-                        rawDocument.body.removeChild(script);
-                        if (done)
-                            done();
-                    };
+            function jsonpReq(url, callbackId, done) {
+                var script = rawDocument.createElement('script'), callback = null;
                 script.type = 'text/javascript';
                 script.src = url;
-                if (msie && msie <= 8) {
-                    script.onreadystatechange = function () {
-                        if (/loaded|complete/.test(script.readyState)) {
-                            doneWrapper();
+                script.async = true;
+                callback = function (event) {
+                    removeEventListenerFn(script, 'load', callback);
+                    removeEventListenerFn(script, 'error', callback);
+                    rawDocument.body.removeChild(script);
+                    script = null;
+                    var status = -1;
+                    var text = 'unknown';
+                    if (event) {
+                        if (event.type === 'load' && !callbacks[callbackId].called) {
+                            event = { type: 'error' };
                         }
-                    };
-                } else {
-                    script.onload = script.onerror = function () {
-                        doneWrapper();
-                    };
-                }
+                        text = event.type;
+                        status = event.type === 'error' ? 404 : 200;
+                    }
+                    if (done) {
+                        done(status, text);
+                    }
+                };
+                addEventListenerFn(script, 'load', callback);
+                addEventListenerFn(script, 'error', callback);
                 rawDocument.body.appendChild(script);
-                return doneWrapper;
+                return callback;
             }
         }
-        var $interpolateMinErr = minErr('$interpolate');
+        var $interpolateMinErr = angular.$interpolateMinErr = minErr('$interpolate');
+        $interpolateMinErr.throwNoconcat = function (text) {
+            throw $interpolateMinErr('noconcat', 'Error while interpolating: {0}\nStrict Contextual Escaping disallows ' + 'interpolations that concatenate multiple expressions when a trusted value is ' + 'required.  See http://docs.angularjs.org/api/ng.$sce', text);
+        };
+        $interpolateMinErr.interr = function (text, err) {
+            return $interpolateMinErr('interr', 'Can\'t interpolate: {0}\n{1}', text, err.toString());
+        };
         function $InterpolateProvider() {
             var startSymbol = '{{';
             var endSymbol = '}}';
@@ -3357,57 +5000,116 @@ define('angular', [], function () {
                 '$exceptionHandler',
                 '$sce',
                 function ($parse, $exceptionHandler, $sce) {
-                    var startSymbolLength = startSymbol.length, endSymbolLength = endSymbol.length;
-                    function $interpolate(text, mustHaveExpression, trustedContext) {
-                        var startIndex, endIndex, index = 0, parts = [], length = text.length, hasInterpolation = false, fn, exp, concat = [];
-                        while (index < length) {
+                    var startSymbolLength = startSymbol.length, endSymbolLength = endSymbol.length, escapedStartRegexp = new RegExp(startSymbol.replace(/./g, escape), 'g'), escapedEndRegexp = new RegExp(endSymbol.replace(/./g, escape), 'g');
+                    function escape(ch) {
+                        return '\\\\\\' + ch;
+                    }
+                    function unescapeText(text) {
+                        return text.replace(escapedStartRegexp, startSymbol).replace(escapedEndRegexp, endSymbol);
+                    }
+                    function stringify(value) {
+                        if (value == null) {
+                            return '';
+                        }
+                        switch (typeof value) {
+                        case 'string':
+                            break;
+                        case 'number':
+                            value = '' + value;
+                            break;
+                        default:
+                            value = toJson(value);
+                        }
+                        return value;
+                    }
+                    function constantWatchDelegate(scope, listener, objectEquality, constantInterp) {
+                        var unwatch;
+                        return unwatch = scope.$watch(function constantInterpolateWatch(scope) {
+                            unwatch();
+                            return constantInterp(scope);
+                        }, listener, objectEquality);
+                    }
+                    function $interpolate(text, mustHaveExpression, trustedContext, allOrNothing) {
+                        if (!text.length || text.indexOf(startSymbol) === -1) {
+                            var constantInterp;
+                            if (!mustHaveExpression) {
+                                var unescapedText = unescapeText(text);
+                                constantInterp = valueFn(unescapedText);
+                                constantInterp.exp = text;
+                                constantInterp.expressions = [];
+                                constantInterp.$$watchDelegate = constantWatchDelegate;
+                            }
+                            return constantInterp;
+                        }
+                        allOrNothing = !!allOrNothing;
+                        var startIndex, endIndex, index = 0, expressions = [], parseFns = [], textLength = text.length, exp, concat = [], expressionPositions = [];
+                        while (index < textLength) {
                             if ((startIndex = text.indexOf(startSymbol, index)) != -1 && (endIndex = text.indexOf(endSymbol, startIndex + startSymbolLength)) != -1) {
-                                index != startIndex && parts.push(text.substring(index, startIndex));
-                                parts.push(fn = $parse(exp = text.substring(startIndex + startSymbolLength, endIndex)));
-                                fn.exp = exp;
+                                if (index !== startIndex) {
+                                    concat.push(unescapeText(text.substring(index, startIndex)));
+                                }
+                                exp = text.substring(startIndex + startSymbolLength, endIndex);
+                                expressions.push(exp);
+                                parseFns.push($parse(exp, parseStringifyInterceptor));
                                 index = endIndex + endSymbolLength;
-                                hasInterpolation = true;
+                                expressionPositions.push(concat.length);
+                                concat.push('');
                             } else {
-                                index != length && parts.push(text.substring(index));
-                                index = length;
+                                if (index !== textLength) {
+                                    concat.push(unescapeText(text.substring(index)));
+                                }
+                                break;
                             }
                         }
-                        if (!(length = parts.length)) {
-                            parts.push('');
-                            length = 1;
+                        if (trustedContext && concat.length > 1) {
+                            $interpolateMinErr.throwNoconcat(text);
                         }
-                        if (trustedContext && parts.length > 1) {
-                            throw $interpolateMinErr('noconcat', 'Error while interpolating: {0}\nStrict Contextual Escaping disallows ' + 'interpolations that concatenate multiple expressions when a trusted value is ' + 'required.  See http://docs.angularjs.org/api/ng.$sce', text);
-                        }
-                        if (!mustHaveExpression || hasInterpolation) {
-                            concat.length = length;
-                            fn = function (context) {
-                                try {
-                                    for (var i = 0, ii = length, part; i < ii; i++) {
-                                        if (typeof (part = parts[i]) == 'function') {
-                                            part = part(context);
-                                            if (trustedContext) {
-                                                part = $sce.getTrusted(trustedContext, part);
-                                            } else {
-                                                part = $sce.valueOf(part);
-                                            }
-                                            if (part === null || isUndefined(part)) {
-                                                part = '';
-                                            } else if (typeof part != 'string') {
-                                                part = toJson(part);
-                                            }
-                                        }
-                                        concat[i] = part;
-                                    }
-                                    return concat.join('');
-                                } catch (err) {
-                                    var newErr = $interpolateMinErr('interr', 'Can\'t interpolate: {0}\n{1}', text, err.toString());
-                                    $exceptionHandler(newErr);
+                        if (!mustHaveExpression || expressions.length) {
+                            var compute = function (values) {
+                                for (var i = 0, ii = expressions.length; i < ii; i++) {
+                                    if (allOrNothing && isUndefined(values[i]))
+                                        return;
+                                    concat[expressionPositions[i]] = values[i];
                                 }
+                                return concat.join('');
                             };
-                            fn.exp = text;
-                            fn.parts = parts;
-                            return fn;
+                            var getValue = function (value) {
+                                return trustedContext ? $sce.getTrusted(trustedContext, value) : $sce.valueOf(value);
+                            };
+                            return extend(function interpolationFn(context) {
+                                var i = 0;
+                                var ii = expressions.length;
+                                var values = new Array(ii);
+                                try {
+                                    for (; i < ii; i++) {
+                                        values[i] = parseFns[i](context);
+                                    }
+                                    return compute(values);
+                                } catch (err) {
+                                    $exceptionHandler($interpolateMinErr.interr(text, err));
+                                }
+                            }, {
+                                exp: text,
+                                expressions: expressions,
+                                $$watchDelegate: function (scope, listener) {
+                                    var lastValue;
+                                    return scope.$watchGroup(parseFns, function interpolateFnWatcher(values, oldValues) {
+                                        var currValue = compute(values);
+                                        if (isFunction(listener)) {
+                                            listener.call(this, currValue, values !== oldValues ? lastValue : currValue, scope);
+                                        }
+                                        lastValue = currValue;
+                                    });
+                                }
+                            });
+                        }
+                        function parseStringifyInterceptor(value) {
+                            try {
+                                value = getValue(value);
+                                return allOrNothing && !isDefined(value) ? value : stringify(value);
+                            } catch (err) {
+                                $exceptionHandler($interpolateMinErr.interr(text, err));
+                            }
                         }
                     }
                     $interpolate.startSymbol = function () {
@@ -3425,12 +5127,19 @@ define('angular', [], function () {
                 '$rootScope',
                 '$window',
                 '$q',
-                function ($rootScope, $window, $q) {
+                '$$q',
+                '$browser',
+                function ($rootScope, $window, $q, $$q, $browser) {
                     var intervals = {};
                     function interval(fn, delay, count, invokeApply) {
-                        var setInterval = $window.setInterval, clearInterval = $window.clearInterval, deferred = $q.defer(), promise = deferred.promise, iteration = 0, skipApply = isDefined(invokeApply) && !invokeApply;
-                        count = isDefined(count) ? count : 0, promise.then(null, null, fn);
+                        var hasParams = arguments.length > 4, args = hasParams ? sliceArgs(arguments, 4) : [], setInterval = $window.setInterval, clearInterval = $window.clearInterval, iteration = 0, skipApply = isDefined(invokeApply) && !invokeApply, deferred = (skipApply ? $$q : $q).defer(), promise = deferred.promise;
+                        count = isDefined(count) ? count : 0;
                         promise.$$intervalId = setInterval(function tick() {
+                            if (skipApply) {
+                                $browser.defer(callback);
+                            } else {
+                                $rootScope.$evalAsync(callback);
+                            }
                             deferred.notify(iteration++);
                             if (count > 0 && iteration >= count) {
                                 deferred.resolve(iteration);
@@ -3442,11 +5151,18 @@ define('angular', [], function () {
                         }, delay);
                         intervals[promise.$$intervalId] = deferred;
                         return promise;
+                        function callback() {
+                            if (!hasParams) {
+                                fn(iteration);
+                            } else {
+                                fn.apply(null, args);
+                            }
+                        }
                     }
                     interval.cancel = function (promise) {
                         if (promise && promise.$$intervalId in intervals) {
                             intervals[promise.$$intervalId].reject('canceled');
-                            clearInterval(promise.$$intervalId);
+                            $window.clearInterval(promise.$$intervalId);
                             delete intervals[promise.$$intervalId];
                             return true;
                         }
@@ -3455,66 +5171,6 @@ define('angular', [], function () {
                     return interval;
                 }
             ];
-        }
-        function $LocaleProvider() {
-            this.$get = function () {
-                return {
-                    id: 'en-us',
-                    NUMBER_FORMATS: {
-                        DECIMAL_SEP: '.',
-                        GROUP_SEP: ',',
-                        PATTERNS: [
-                            {
-                                minInt: 1,
-                                minFrac: 0,
-                                maxFrac: 3,
-                                posPre: '',
-                                posSuf: '',
-                                negPre: '-',
-                                negSuf: '',
-                                gSize: 3,
-                                lgSize: 3
-                            },
-                            {
-                                minInt: 1,
-                                minFrac: 2,
-                                maxFrac: 2,
-                                posPre: '\xA4',
-                                posSuf: '',
-                                negPre: '(\xA4',
-                                negSuf: ')',
-                                gSize: 3,
-                                lgSize: 3
-                            }
-                        ],
-                        CURRENCY_SYM: '$'
-                    },
-                    DATETIME_FORMATS: {
-                        MONTH: 'January,February,March,April,May,June,July,August,September,October,November,December'.split(','),
-                        SHORTMONTH: 'Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec'.split(','),
-                        DAY: 'Sunday,Monday,Tuesday,Wednesday,Thursday,Friday,Saturday'.split(','),
-                        SHORTDAY: 'Sun,Mon,Tue,Wed,Thu,Fri,Sat'.split(','),
-                        AMPMS: [
-                            'AM',
-                            'PM'
-                        ],
-                        medium: 'MMM d, y h:mm:ss a',
-                        short: 'M/d/yy h:mm a',
-                        fullDate: 'EEEE, MMMM d, y',
-                        longDate: 'MMMM d, y',
-                        mediumDate: 'MMM d, y',
-                        shortDate: 'M/d/yy',
-                        mediumTime: 'h:mm:ss a',
-                        shortTime: 'h:mm a'
-                    },
-                    pluralCat: function (num) {
-                        if (num === 1) {
-                            return 'one';
-                        }
-                        return 'other';
-                    }
-                };
-            };
         }
         var PATH_MATCH = /^([^\?#]*)(\?([^#]*))?(#(.*))?$/, DEFAULT_PORTS = {
                 'http': 80,
@@ -3529,18 +5185,18 @@ define('angular', [], function () {
             }
             return segments.join('/');
         }
-        function parseAbsoluteUrl(absoluteUrl, locationObj, appBase) {
-            var parsedUrl = urlResolve(absoluteUrl, appBase);
+        function parseAbsoluteUrl(absoluteUrl, locationObj) {
+            var parsedUrl = urlResolve(absoluteUrl);
             locationObj.$$protocol = parsedUrl.protocol;
             locationObj.$$host = parsedUrl.hostname;
-            locationObj.$$port = int(parsedUrl.port) || DEFAULT_PORTS[parsedUrl.protocol] || null;
+            locationObj.$$port = toInt(parsedUrl.port) || DEFAULT_PORTS[parsedUrl.protocol] || null;
         }
-        function parseAppUrl(relativeUrl, locationObj, appBase) {
+        function parseAppUrl(relativeUrl, locationObj) {
             var prefixed = relativeUrl.charAt(0) !== '/';
             if (prefixed) {
                 relativeUrl = '/' + relativeUrl;
             }
-            var match = urlResolve(relativeUrl, appBase);
+            var match = urlResolve(relativeUrl);
             locationObj.$$path = decodeURIComponent(prefixed && match.pathname.charAt(0) === '/' ? match.pathname.substring(1) : match.pathname);
             locationObj.$$search = parseKeyValue(match.search);
             locationObj.$$hash = decodeURIComponent(match.hash);
@@ -3557,23 +5213,25 @@ define('angular', [], function () {
             var index = url.indexOf('#');
             return index == -1 ? url : url.substr(0, index);
         }
+        function trimEmptyHash(url) {
+            return url.replace(/(#.+)|#$/, '$1');
+        }
         function stripFile(url) {
             return url.substr(0, stripHash(url).lastIndexOf('/') + 1);
         }
         function serverBase(url) {
             return url.substring(0, url.indexOf('/', url.indexOf('//') + 2));
         }
-        function LocationHtml5Url(appBase, basePrefix) {
+        function LocationHtml5Url(appBase, appBaseNoFile, basePrefix) {
             this.$$html5 = true;
             basePrefix = basePrefix || '';
-            var appBaseNoFile = stripFile(appBase);
-            parseAbsoluteUrl(appBase, this, appBase);
+            parseAbsoluteUrl(appBase, this);
             this.$$parse = function (url) {
                 var pathUrl = beginsWith(appBaseNoFile, url);
                 if (!isString(pathUrl)) {
                     throw $locationMinErr('ipthprfx', 'Invalid url "{0}", missing path prefix "{1}".', url, appBaseNoFile);
                 }
-                parseAppUrl(pathUrl, this, appBase);
+                parseAppUrl(pathUrl, this);
                 if (!this.$$path) {
                     this.$$path = '/';
                 }
@@ -3584,36 +5242,57 @@ define('angular', [], function () {
                 this.$$url = encodePath(this.$$path) + (search ? '?' + search : '') + hash;
                 this.$$absUrl = appBaseNoFile + this.$$url.substr(1);
             };
-            this.$$rewrite = function (url) {
-                var appUrl, prevAppUrl;
-                if ((appUrl = beginsWith(appBase, url)) !== undefined) {
-                    prevAppUrl = appUrl;
-                    if ((appUrl = beginsWith(basePrefix, appUrl)) !== undefined) {
-                        return appBaseNoFile + (beginsWith('/', appUrl) || appUrl);
-                    } else {
-                        return appBase + prevAppUrl;
-                    }
-                } else if ((appUrl = beginsWith(appBaseNoFile, url)) !== undefined) {
-                    return appBaseNoFile + appUrl;
-                } else if (appBaseNoFile == url + '/') {
-                    return appBaseNoFile;
+            this.$$parseLinkUrl = function (url, relHref) {
+                if (relHref && relHref[0] === '#') {
+                    this.hash(relHref.slice(1));
+                    return true;
                 }
+                var appUrl, prevAppUrl;
+                var rewrittenUrl;
+                if (isDefined(appUrl = beginsWith(appBase, url))) {
+                    prevAppUrl = appUrl;
+                    if (isDefined(appUrl = beginsWith(basePrefix, appUrl))) {
+                        rewrittenUrl = appBaseNoFile + (beginsWith('/', appUrl) || appUrl);
+                    } else {
+                        rewrittenUrl = appBase + prevAppUrl;
+                    }
+                } else if (isDefined(appUrl = beginsWith(appBaseNoFile, url))) {
+                    rewrittenUrl = appBaseNoFile + appUrl;
+                } else if (appBaseNoFile == url + '/') {
+                    rewrittenUrl = appBaseNoFile;
+                }
+                if (rewrittenUrl) {
+                    this.$$parse(rewrittenUrl);
+                }
+                return !!rewrittenUrl;
             };
         }
-        function LocationHashbangUrl(appBase, hashPrefix) {
-            var appBaseNoFile = stripFile(appBase);
-            parseAbsoluteUrl(appBase, this, appBase);
+        function LocationHashbangUrl(appBase, appBaseNoFile, hashPrefix) {
+            parseAbsoluteUrl(appBase, this);
             this.$$parse = function (url) {
                 var withoutBaseUrl = beginsWith(appBase, url) || beginsWith(appBaseNoFile, url);
-                var withoutHashUrl = withoutBaseUrl.charAt(0) == '#' ? beginsWith(hashPrefix, withoutBaseUrl) : this.$$html5 ? withoutBaseUrl : '';
-                if (!isString(withoutHashUrl)) {
-                    throw $locationMinErr('ihshprfx', 'Invalid url "{0}", missing hash prefix "{1}".', url, hashPrefix);
+                var withoutHashUrl;
+                if (!isUndefined(withoutBaseUrl) && withoutBaseUrl.charAt(0) === '#') {
+                    withoutHashUrl = beginsWith(hashPrefix, withoutBaseUrl);
+                    if (isUndefined(withoutHashUrl)) {
+                        withoutHashUrl = withoutBaseUrl;
+                    }
+                } else {
+                    if (this.$$html5) {
+                        withoutHashUrl = withoutBaseUrl;
+                    } else {
+                        withoutHashUrl = '';
+                        if (isUndefined(withoutBaseUrl)) {
+                            appBase = url;
+                            this.replace();
+                        }
+                    }
                 }
-                parseAppUrl(withoutHashUrl, this, appBase);
+                parseAppUrl(withoutHashUrl, this);
                 this.$$path = removeWindowsDriveName(this.$$path, withoutHashUrl, appBase);
                 this.$$compose();
                 function removeWindowsDriveName(path, url, base) {
-                    var windowsFilePathExp = /^\/?.*?:(\/.*)/;
+                    var windowsFilePathExp = /^\/[A-Z]:(\/.*)/;
                     var firstPathSegmentMatch;
                     if (url.indexOf(base) === 0) {
                         url = url.replace(base, '');
@@ -3630,46 +5309,63 @@ define('angular', [], function () {
                 this.$$url = encodePath(this.$$path) + (search ? '?' + search : '') + hash;
                 this.$$absUrl = appBase + (this.$$url ? hashPrefix + this.$$url : '');
             };
-            this.$$rewrite = function (url) {
+            this.$$parseLinkUrl = function (url, relHref) {
                 if (stripHash(appBase) == stripHash(url)) {
-                    return url;
+                    this.$$parse(url);
+                    return true;
                 }
+                return false;
             };
         }
-        function LocationHashbangInHtml5Url(appBase, hashPrefix) {
+        function LocationHashbangInHtml5Url(appBase, appBaseNoFile, hashPrefix) {
             this.$$html5 = true;
             LocationHashbangUrl.apply(this, arguments);
-            var appBaseNoFile = stripFile(appBase);
-            this.$$rewrite = function (url) {
+            this.$$parseLinkUrl = function (url, relHref) {
+                if (relHref && relHref[0] === '#') {
+                    this.hash(relHref.slice(1));
+                    return true;
+                }
+                var rewrittenUrl;
                 var appUrl;
                 if (appBase == stripHash(url)) {
-                    return url;
+                    rewrittenUrl = url;
                 } else if (appUrl = beginsWith(appBaseNoFile, url)) {
-                    return appBase + hashPrefix + appUrl;
+                    rewrittenUrl = appBase + hashPrefix + appUrl;
                 } else if (appBaseNoFile === url + '/') {
-                    return appBaseNoFile;
+                    rewrittenUrl = appBaseNoFile;
                 }
+                if (rewrittenUrl) {
+                    this.$$parse(rewrittenUrl);
+                }
+                return !!rewrittenUrl;
+            };
+            this.$$compose = function () {
+                var search = toKeyValue(this.$$search), hash = this.$$hash ? '#' + encodeUriSegment(this.$$hash) : '';
+                this.$$url = encodePath(this.$$path) + (search ? '?' + search : '') + hash;
+                this.$$absUrl = appBase + hashPrefix + this.$$url;
             };
         }
-        LocationHashbangInHtml5Url.prototype = LocationHashbangUrl.prototype = LocationHtml5Url.prototype = {
+        var locationPrototype = {
             $$html5: false,
             $$replace: false,
             absUrl: locationGetter('$$absUrl'),
-            url: function (url, replace) {
-                if (isUndefined(url))
+            url: function (url) {
+                if (isUndefined(url)) {
                     return this.$$url;
+                }
                 var match = PATH_MATCH.exec(url);
-                if (match[1])
+                if (match[1] || url === '')
                     this.path(decodeURIComponent(match[1]));
-                if (match[2] || match[1])
+                if (match[2] || match[1] || url === '')
                     this.search(match[3] || '');
-                this.hash(match[5] || '', replace);
+                this.hash(match[5] || '');
                 return this;
             },
             protocol: locationGetter('$$protocol'),
             host: locationGetter('$$host'),
             port: locationGetter('$$port'),
             path: locationGetterSetter('$$path', function (path) {
+                path = path !== null ? path.toString() : '';
                 return path.charAt(0) == '/' ? path : '/' + path;
             }),
             search: function (search, paramValue) {
@@ -3677,9 +5373,15 @@ define('angular', [], function () {
                 case 0:
                     return this.$$search;
                 case 1:
-                    if (isString(search)) {
+                    if (isString(search) || isNumber(search)) {
+                        search = search.toString();
                         this.$$search = parseKeyValue(search);
                     } else if (isObject(search)) {
+                        search = copy(search, {});
+                        forEach(search, function (value, key) {
+                            if (value == null)
+                                delete search[key];
+                        });
                         this.$$search = search;
                     } else {
                         throw $locationMinErr('isrcharg', 'The first argument of the `$location#search()` call must be a string or an object.');
@@ -3695,12 +5397,31 @@ define('angular', [], function () {
                 this.$$compose();
                 return this;
             },
-            hash: locationGetterSetter('$$hash', identity),
+            hash: locationGetterSetter('$$hash', function (hash) {
+                return hash !== null ? hash.toString() : '';
+            }),
             replace: function () {
                 this.$$replace = true;
                 return this;
             }
         };
+        forEach([
+            LocationHashbangInHtml5Url,
+            LocationHashbangUrl,
+            LocationHtml5Url
+        ], function (Location) {
+            Location.prototype = Object.create(locationPrototype);
+            Location.prototype.state = function (state) {
+                if (!arguments.length) {
+                    return this.$$state;
+                }
+                if (Location !== LocationHtml5Url || !this.$$html5) {
+                    throw $locationMinErr('nostate', 'History API state support is available only ' + 'in HTML5 mode and only in browsers supporting HTML5 History API');
+                }
+                this.$$state = isUndefined(state) ? null : state;
+                return this;
+            };
+        });
         function locationGetter(property) {
             return function () {
                 return this[property];
@@ -3708,15 +5429,20 @@ define('angular', [], function () {
         }
         function locationGetterSetter(property, preprocess) {
             return function (value) {
-                if (isUndefined(value))
+                if (isUndefined(value)) {
                     return this[property];
+                }
                 this[property] = preprocess(value);
                 this.$$compose();
                 return this;
             };
         }
         function $LocationProvider() {
-            var hashPrefix = '', html5Mode = false;
+            var hashPrefix = '', html5Mode = {
+                    enabled: false,
+                    requireBase: true,
+                    rewriteLinks: true
+                };
             this.hashPrefix = function (prefix) {
                 if (isDefined(prefix)) {
                     hashPrefix = prefix;
@@ -3726,8 +5452,19 @@ define('angular', [], function () {
                 }
             };
             this.html5Mode = function (mode) {
-                if (isDefined(mode)) {
-                    html5Mode = mode;
+                if (isBoolean(mode)) {
+                    html5Mode.enabled = mode;
+                    return this;
+                } else if (isObject(mode)) {
+                    if (isBoolean(mode.enabled)) {
+                        html5Mode.enabled = mode.enabled;
+                    }
+                    if (isBoolean(mode.requireBase)) {
+                        html5Mode.requireBase = mode.requireBase;
+                    }
+                    if (isBoolean(mode.rewriteLinks)) {
+                        html5Mode.rewriteLinks = mode.rewriteLinks;
+                    }
                     return this;
                 } else {
                     return html5Mode;
@@ -3738,75 +5475,121 @@ define('angular', [], function () {
                 '$browser',
                 '$sniffer',
                 '$rootElement',
-                function ($rootScope, $browser, $sniffer, $rootElement) {
+                '$window',
+                function ($rootScope, $browser, $sniffer, $rootElement, $window) {
                     var $location, LocationMode, baseHref = $browser.baseHref(), initialUrl = $browser.url(), appBase;
-                    if (html5Mode) {
+                    if (html5Mode.enabled) {
+                        if (!baseHref && html5Mode.requireBase) {
+                            throw $locationMinErr('nobase', '$location in HTML5 mode requires a <base> tag to be present!');
+                        }
                         appBase = serverBase(initialUrl) + (baseHref || '/');
                         LocationMode = $sniffer.history ? LocationHtml5Url : LocationHashbangInHtml5Url;
                     } else {
                         appBase = stripHash(initialUrl);
                         LocationMode = LocationHashbangUrl;
                     }
-                    $location = new LocationMode(appBase, '#' + hashPrefix);
-                    $location.$$parse($location.$$rewrite(initialUrl));
+                    var appBaseNoFile = stripFile(appBase);
+                    $location = new LocationMode(appBase, appBaseNoFile, '#' + hashPrefix);
+                    $location.$$parseLinkUrl(initialUrl, initialUrl);
+                    $location.$$state = $browser.state();
+                    var IGNORE_URI_REGEXP = /^\s*(javascript|mailto):/i;
+                    function setBrowserUrlWithFallback(url, replace, state) {
+                        var oldUrl = $location.url();
+                        var oldState = $location.$$state;
+                        try {
+                            $browser.url(url, replace, state);
+                            $location.$$state = $browser.state();
+                        } catch (e) {
+                            $location.url(oldUrl);
+                            $location.$$state = oldState;
+                            throw e;
+                        }
+                    }
                     $rootElement.on('click', function (event) {
-                        if (event.ctrlKey || event.metaKey || event.which == 2)
+                        if (!html5Mode.rewriteLinks || event.ctrlKey || event.metaKey || event.shiftKey || event.which == 2 || event.button == 2)
                             return;
                         var elm = jqLite(event.target);
-                        while (lowercase(elm[0].nodeName) !== 'a') {
+                        while (nodeName_(elm[0]) !== 'a') {
                             if (elm[0] === $rootElement[0] || !(elm = elm.parent())[0])
                                 return;
                         }
                         var absHref = elm.prop('href');
-                        var rewrittenUrl = $location.$$rewrite(absHref);
-                        if (absHref && !elm.attr('target') && rewrittenUrl && !event.isDefaultPrevented()) {
-                            event.preventDefault();
-                            if (rewrittenUrl != $browser.url()) {
-                                $location.$$parse(rewrittenUrl);
-                                $rootScope.$apply();
-                                window.angular['ff-684208-preventDefault'] = true;
+                        var relHref = elm.attr('href') || elm.attr('xlink:href');
+                        if (isObject(absHref) && absHref.toString() === '[object SVGAnimatedString]') {
+                            absHref = urlResolve(absHref.animVal).href;
+                        }
+                        if (IGNORE_URI_REGEXP.test(absHref))
+                            return;
+                        if (absHref && !elm.attr('target') && !event.isDefaultPrevented()) {
+                            if ($location.$$parseLinkUrl(absHref, relHref)) {
+                                event.preventDefault();
+                                if ($location.absUrl() != $browser.url()) {
+                                    $rootScope.$apply();
+                                    $window.angular['ff-684208-preventDefault'] = true;
+                                }
                             }
                         }
                     });
-                    if ($location.absUrl() != initialUrl) {
+                    if (trimEmptyHash($location.absUrl()) != trimEmptyHash(initialUrl)) {
                         $browser.url($location.absUrl(), true);
                     }
-                    $browser.onUrlChange(function (newUrl) {
-                        if ($location.absUrl() != newUrl) {
-                            if ($rootScope.$broadcast('$locationChangeStart', newUrl, $location.absUrl()).defaultPrevented) {
-                                $browser.url($location.absUrl());
-                                return;
-                            }
-                            $rootScope.$evalAsync(function () {
-                                var oldUrl = $location.absUrl();
-                                $location.$$parse(newUrl);
-                                afterLocationChange(oldUrl);
-                            });
-                            if (!$rootScope.$$phase)
-                                $rootScope.$digest();
+                    var initializing = true;
+                    $browser.onUrlChange(function (newUrl, newState) {
+                        if (isUndefined(beginsWith(appBaseNoFile, newUrl))) {
+                            $window.location.href = newUrl;
+                            return;
                         }
+                        $rootScope.$evalAsync(function () {
+                            var oldUrl = $location.absUrl();
+                            var oldState = $location.$$state;
+                            var defaultPrevented;
+                            newUrl = trimEmptyHash(newUrl);
+                            $location.$$parse(newUrl);
+                            $location.$$state = newState;
+                            defaultPrevented = $rootScope.$broadcast('$locationChangeStart', newUrl, oldUrl, newState, oldState).defaultPrevented;
+                            if ($location.absUrl() !== newUrl)
+                                return;
+                            if (defaultPrevented) {
+                                $location.$$parse(oldUrl);
+                                $location.$$state = oldState;
+                                setBrowserUrlWithFallback(oldUrl, false, oldState);
+                            } else {
+                                initializing = false;
+                                afterLocationChange(oldUrl, oldState);
+                            }
+                        });
+                        if (!$rootScope.$$phase)
+                            $rootScope.$digest();
                     });
-                    var changeCounter = 0;
                     $rootScope.$watch(function $locationWatch() {
-                        var oldUrl = $browser.url();
+                        var oldUrl = trimEmptyHash($browser.url());
+                        var newUrl = trimEmptyHash($location.absUrl());
+                        var oldState = $browser.state();
                         var currentReplace = $location.$$replace;
-                        if (!changeCounter || oldUrl != $location.absUrl()) {
-                            changeCounter++;
+                        var urlOrStateChanged = oldUrl !== newUrl || $location.$$html5 && $sniffer.history && oldState !== $location.$$state;
+                        if (initializing || urlOrStateChanged) {
+                            initializing = false;
                             $rootScope.$evalAsync(function () {
-                                if ($rootScope.$broadcast('$locationChangeStart', $location.absUrl(), oldUrl).defaultPrevented) {
+                                var newUrl = $location.absUrl();
+                                var defaultPrevented = $rootScope.$broadcast('$locationChangeStart', newUrl, oldUrl, $location.$$state, oldState).defaultPrevented;
+                                if ($location.absUrl() !== newUrl)
+                                    return;
+                                if (defaultPrevented) {
                                     $location.$$parse(oldUrl);
+                                    $location.$$state = oldState;
                                 } else {
-                                    $browser.url($location.absUrl(), currentReplace);
-                                    afterLocationChange(oldUrl);
+                                    if (urlOrStateChanged) {
+                                        setBrowserUrlWithFallback(newUrl, currentReplace, oldState === $location.$$state ? null : $location.$$state);
+                                    }
+                                    afterLocationChange(oldUrl, oldState);
                                 }
                             });
                         }
                         $location.$$replace = false;
-                        return changeCounter;
                     });
                     return $location;
-                    function afterLocationChange(oldUrl) {
-                        $rootScope.$broadcast('$locationChangeSuccess', $location.absUrl(), oldUrl);
+                    function afterLocationChange(oldUrl, oldState) {
+                        $rootScope.$broadcast('$locationChangeSuccess', $location.absUrl(), oldUrl, $location.$$state, oldState);
                     }
                 }
             ];
@@ -3849,8 +5632,12 @@ define('angular', [], function () {
                         return arg;
                     }
                     function consoleLog(type) {
-                        var console = $window.console || {}, logFn = console[type] || console.log || noop;
-                        if (logFn.apply) {
+                        var console = $window.console || {}, logFn = console[type] || console.log || noop, hasApply = false;
+                        try {
+                            hasApply = !!logFn.apply;
+                        } catch (e) {
+                        }
+                        if (hasApply) {
                             return function () {
                                 var args = [];
                                 forEach(arguments, function (arg) {
@@ -3867,105 +5654,52 @@ define('angular', [], function () {
             ];
         }
         var $parseMinErr = minErr('$parse');
-        var promiseWarningCache = {};
-        var promiseWarning;
         function ensureSafeMemberName(name, fullExpression) {
-            if (name === 'constructor') {
-                throw $parseMinErr('isecfld', 'Referencing "constructor" field in Angular expressions is disallowed! Expression: {0}', fullExpression);
+            if (name === '__defineGetter__' || name === '__defineSetter__' || name === '__lookupGetter__' || name === '__lookupSetter__' || name === '__proto__') {
+                throw $parseMinErr('isecfld', 'Attempting to access a disallowed field in Angular expressions! ' + 'Expression: {0}', fullExpression);
             }
             return name;
         }
+        function getStringValue(name) {
+            return name + '';
+        }
         function ensureSafeObject(obj, fullExpression) {
-            if (obj && obj.constructor === obj) {
-                throw $parseMinErr('isecfn', 'Referencing Function in Angular expressions is disallowed! Expression: {0}', fullExpression);
-            } else if (obj && obj.document && obj.location && obj.alert && obj.setInterval) {
-                throw $parseMinErr('isecwindow', 'Referencing the Window in Angular expressions is disallowed! Expression: {0}', fullExpression);
-            } else if (obj && (obj.nodeName || obj.on && obj.find)) {
-                throw $parseMinErr('isecdom', 'Referencing DOM nodes in Angular expressions is disallowed! Expression: {0}', fullExpression);
-            } else {
-                return obj;
+            if (obj) {
+                if (obj.constructor === obj) {
+                    throw $parseMinErr('isecfn', 'Referencing Function in Angular expressions is disallowed! Expression: {0}', fullExpression);
+                } else if (obj.window === obj) {
+                    throw $parseMinErr('isecwindow', 'Referencing the Window in Angular expressions is disallowed! Expression: {0}', fullExpression);
+                } else if (obj.children && (obj.nodeName || obj.prop && obj.attr && obj.find)) {
+                    throw $parseMinErr('isecdom', 'Referencing DOM nodes in Angular expressions is disallowed! Expression: {0}', fullExpression);
+                } else if (obj === Object) {
+                    throw $parseMinErr('isecobj', 'Referencing Object in Angular expressions is disallowed! Expression: {0}', fullExpression);
+                }
+            }
+            return obj;
+        }
+        var CALL = Function.prototype.call;
+        var APPLY = Function.prototype.apply;
+        var BIND = Function.prototype.bind;
+        function ensureSafeFunction(obj, fullExpression) {
+            if (obj) {
+                if (obj.constructor === obj) {
+                    throw $parseMinErr('isecfn', 'Referencing Function in Angular expressions is disallowed! Expression: {0}', fullExpression);
+                } else if (obj === CALL || obj === APPLY || obj === BIND) {
+                    throw $parseMinErr('isecff', 'Referencing call, apply or bind in Angular expressions is disallowed! Expression: {0}', fullExpression);
+                }
             }
         }
-        var OPERATORS = {
-            'null': function () {
-                return null;
-            },
-            'true': function () {
-                return true;
-            },
-            'false': function () {
-                return false;
-            },
-            undefined: noop,
-            '+': function (self, locals, a, b) {
-                a = a(self, locals);
-                b = b(self, locals);
-                if (isDefined(a)) {
-                    if (isDefined(b)) {
-                        return a + b;
-                    }
-                    return a;
+        function ensureSafeAssignContext(obj, fullExpression) {
+            if (obj) {
+                if (obj === 0..constructor || obj === false.constructor || obj === ''.constructor || obj === {}.constructor || obj === [].constructor || obj === Function.constructor) {
+                    throw $parseMinErr('isecaf', 'Assigning to a constructor is disallowed! Expression: {0}', fullExpression);
                 }
-                return isDefined(b) ? b : undefined;
-            },
-            '-': function (self, locals, a, b) {
-                a = a(self, locals);
-                b = b(self, locals);
-                return (isDefined(a) ? a : 0) - (isDefined(b) ? b : 0);
-            },
-            '*': function (self, locals, a, b) {
-                return a(self, locals) * b(self, locals);
-            },
-            '/': function (self, locals, a, b) {
-                return a(self, locals) / b(self, locals);
-            },
-            '%': function (self, locals, a, b) {
-                return a(self, locals) % b(self, locals);
-            },
-            '^': function (self, locals, a, b) {
-                return a(self, locals) ^ b(self, locals);
-            },
-            '=': noop,
-            '===': function (self, locals, a, b) {
-                return a(self, locals) === b(self, locals);
-            },
-            '!==': function (self, locals, a, b) {
-                return a(self, locals) !== b(self, locals);
-            },
-            '==': function (self, locals, a, b) {
-                return a(self, locals) == b(self, locals);
-            },
-            '!=': function (self, locals, a, b) {
-                return a(self, locals) != b(self, locals);
-            },
-            '<': function (self, locals, a, b) {
-                return a(self, locals) < b(self, locals);
-            },
-            '>': function (self, locals, a, b) {
-                return a(self, locals) > b(self, locals);
-            },
-            '<=': function (self, locals, a, b) {
-                return a(self, locals) <= b(self, locals);
-            },
-            '>=': function (self, locals, a, b) {
-                return a(self, locals) >= b(self, locals);
-            },
-            '&&': function (self, locals, a, b) {
-                return a(self, locals) && b(self, locals);
-            },
-            '||': function (self, locals, a, b) {
-                return a(self, locals) || b(self, locals);
-            },
-            '&': function (self, locals, a, b) {
-                return a(self, locals) & b(self, locals);
-            },
-            '|': function (self, locals, a, b) {
-                return b(self, locals)(self, locals, a(self, locals));
-            },
-            '!': function (self, locals, a) {
-                return !a(self, locals);
             }
-        };
+        }
+        var OPERATORS = createMap();
+        forEach('+ - * / % === !== == != < > <= >= && || ! = |'.split(' '), function (operator) {
+            OPERATORS[operator] = true;
+        });
         var ESCAPE = {
             'n': '\n',
             'f': '\f',
@@ -3983,90 +5717,86 @@ define('angular', [], function () {
             lex: function (text) {
                 this.text = text;
                 this.index = 0;
-                this.ch = undefined;
-                this.lastCh = ':';
                 this.tokens = [];
-                var token;
-                var json = [];
                 while (this.index < this.text.length) {
-                    this.ch = this.text.charAt(this.index);
-                    if (this.is('"\'')) {
-                        this.readString(this.ch);
-                    } else if (this.isNumber(this.ch) || this.is('.') && this.isNumber(this.peek())) {
+                    var ch = this.text.charAt(this.index);
+                    if (ch === '"' || ch === '\'') {
+                        this.readString(ch);
+                    } else if (this.isNumber(ch) || ch === '.' && this.isNumber(this.peek())) {
                         this.readNumber();
-                    } else if (this.isIdent(this.ch)) {
+                    } else if (this.isIdentifierStart(this.peekMultichar())) {
                         this.readIdent();
-                        if (this.was('{,') && json[0] === '{' && (token = this.tokens[this.tokens.length - 1])) {
-                            token.json = token.text.indexOf('.') === -1;
-                        }
-                    } else if (this.is('(){}[].,;:?')) {
+                    } else if (this.is(ch, '(){}[].,;:?')) {
                         this.tokens.push({
                             index: this.index,
-                            text: this.ch,
-                            json: this.was(':[,') && this.is('{[') || this.is('}]:,')
+                            text: ch
                         });
-                        if (this.is('{['))
-                            json.unshift(this.ch);
-                        if (this.is('}]'))
-                            json.shift();
                         this.index++;
-                    } else if (this.isWhitespace(this.ch)) {
+                    } else if (this.isWhitespace(ch)) {
                         this.index++;
-                        continue;
                     } else {
-                        var ch2 = this.ch + this.peek();
+                        var ch2 = ch + this.peek();
                         var ch3 = ch2 + this.peek(2);
-                        var fn = OPERATORS[this.ch];
-                        var fn2 = OPERATORS[ch2];
-                        var fn3 = OPERATORS[ch3];
-                        if (fn3) {
+                        var op1 = OPERATORS[ch];
+                        var op2 = OPERATORS[ch2];
+                        var op3 = OPERATORS[ch3];
+                        if (op1 || op2 || op3) {
+                            var token = op3 ? ch3 : op2 ? ch2 : ch;
                             this.tokens.push({
                                 index: this.index,
-                                text: ch3,
-                                fn: fn3
+                                text: token,
+                                operator: true
                             });
-                            this.index += 3;
-                        } else if (fn2) {
-                            this.tokens.push({
-                                index: this.index,
-                                text: ch2,
-                                fn: fn2
-                            });
-                            this.index += 2;
-                        } else if (fn) {
-                            this.tokens.push({
-                                index: this.index,
-                                text: this.ch,
-                                fn: fn,
-                                json: this.was('[,:') && this.is('+-')
-                            });
-                            this.index += 1;
+                            this.index += token.length;
                         } else {
                             this.throwError('Unexpected next character ', this.index, this.index + 1);
                         }
                     }
-                    this.lastCh = this.ch;
                 }
                 return this.tokens;
             },
-            is: function (chars) {
-                return chars.indexOf(this.ch) !== -1;
-            },
-            was: function (chars) {
-                return chars.indexOf(this.lastCh) !== -1;
+            is: function (ch, chars) {
+                return chars.indexOf(ch) !== -1;
             },
             peek: function (i) {
                 var num = i || 1;
                 return this.index + num < this.text.length ? this.text.charAt(this.index + num) : false;
             },
             isNumber: function (ch) {
-                return '0' <= ch && ch <= '9';
+                return '0' <= ch && ch <= '9' && typeof ch === 'string';
             },
             isWhitespace: function (ch) {
                 return ch === ' ' || ch === '\r' || ch === '\t' || ch === '\n' || ch === '\x0B' || ch === '\xA0';
             },
-            isIdent: function (ch) {
+            isIdentifierStart: function (ch) {
+                return this.options.isIdentifierStart ? this.options.isIdentifierStart(ch, this.codePointAt(ch)) : this.isValidIdentifierStart(ch);
+            },
+            isValidIdentifierStart: function (ch) {
                 return 'a' <= ch && ch <= 'z' || 'A' <= ch && ch <= 'Z' || '_' === ch || ch === '$';
+            },
+            isIdentifierContinue: function (ch) {
+                return this.options.isIdentifierContinue ? this.options.isIdentifierContinue(ch, this.codePointAt(ch)) : this.isValidIdentifierContinue(ch);
+            },
+            isValidIdentifierContinue: function (ch, cp) {
+                return this.isValidIdentifierStart(ch, cp) || this.isNumber(ch);
+            },
+            codePointAt: function (ch) {
+                if (ch.length === 1)
+                    return ch.charCodeAt(0);
+                return (ch.charCodeAt(0) << 10) + ch.charCodeAt(1) - 56613888;
+            },
+            peekMultichar: function () {
+                var ch = this.text.charAt(this.index);
+                var peek = this.peek();
+                if (!peek) {
+                    return ch;
+                }
+                var cp1 = ch.charCodeAt(0);
+                var cp2 = peek.charCodeAt(0);
+                if (cp1 >= 55296 && cp1 <= 56319 && cp2 >= 56320 && cp2 <= 57343) {
+                    return ch + peek;
+                }
+                return ch;
             },
             isExpOperator: function (ch) {
                 return ch === '-' || ch === '+' || this.isNumber(ch);
@@ -4097,79 +5827,28 @@ define('angular', [], function () {
                     }
                     this.index++;
                 }
-                number = 1 * number;
                 this.tokens.push({
                     index: start,
                     text: number,
-                    json: true,
-                    fn: function () {
-                        return number;
-                    }
+                    constant: true,
+                    value: Number(number)
                 });
             },
             readIdent: function () {
-                var parser = this;
-                var ident = '';
                 var start = this.index;
-                var lastDot, peekIndex, methodName, ch;
+                this.index += this.peekMultichar().length;
                 while (this.index < this.text.length) {
-                    ch = this.text.charAt(this.index);
-                    if (ch === '.' || this.isIdent(ch) || this.isNumber(ch)) {
-                        if (ch === '.')
-                            lastDot = this.index;
-                        ident += ch;
-                    } else {
+                    var ch = this.peekMultichar();
+                    if (!this.isIdentifierContinue(ch)) {
                         break;
                     }
-                    this.index++;
+                    this.index += ch.length;
                 }
-                if (lastDot) {
-                    peekIndex = this.index;
-                    while (peekIndex < this.text.length) {
-                        ch = this.text.charAt(peekIndex);
-                        if (ch === '(') {
-                            methodName = ident.substr(lastDot - start + 1);
-                            ident = ident.substr(0, lastDot - start);
-                            this.index = peekIndex;
-                            break;
-                        }
-                        if (this.isWhitespace(ch)) {
-                            peekIndex++;
-                        } else {
-                            break;
-                        }
-                    }
-                }
-                var token = {
+                this.tokens.push({
                     index: start,
-                    text: ident
-                };
-                if (OPERATORS.hasOwnProperty(ident)) {
-                    token.fn = OPERATORS[ident];
-                    token.json = OPERATORS[ident];
-                } else {
-                    var getter = getterFn(ident, this.options, this.text);
-                    token.fn = extend(function (self, locals) {
-                        return getter(self, locals);
-                    }, {
-                        assign: function (self, value) {
-                            return setter(self, ident, value, parser.text, parser.options);
-                        }
-                    });
-                }
-                this.tokens.push(token);
-                if (methodName) {
-                    this.tokens.push({
-                        index: lastDot,
-                        text: '.',
-                        json: false
-                    });
-                    this.tokens.push({
-                        index: lastDot + 1,
-                        text: methodName,
-                        json: false
-                    });
-                }
+                    text: this.text.slice(start, this.index),
+                    identifier: true
+                });
             },
             readString: function (quote) {
                 var start = this.index;
@@ -4183,17 +5862,14 @@ define('angular', [], function () {
                     if (escape) {
                         if (ch === 'u') {
                             var hex = this.text.substring(this.index + 1, this.index + 5);
-                            if (!hex.match(/[\da-f]{4}/i))
+                            if (!hex.match(/[\da-f]{4}/i)) {
                                 this.throwError('Invalid unicode escape [\\u' + hex + ']');
+                            }
                             this.index += 4;
                             string += String.fromCharCode(parseInt(hex, 16));
                         } else {
                             var rep = ESCAPE[ch];
-                            if (rep) {
-                                string += rep;
-                            } else {
-                                string += ch;
-                            }
+                            string = string + (rep || ch);
                         }
                         escape = false;
                     } else if (ch === '\\') {
@@ -4203,11 +5879,8 @@ define('angular', [], function () {
                         this.tokens.push({
                             index: start,
                             text: rawString,
-                            string: string,
-                            json: true,
-                            fn: function () {
-                                return string;
-                            }
+                            constant: true,
+                            value: string
                         });
                         return;
                     } else {
@@ -4218,36 +5891,185 @@ define('angular', [], function () {
                 this.throwError('Unterminated quote', start);
             }
         };
-        var Parser = function (lexer, $filter, options) {
+        var AST = function (lexer, options) {
             this.lexer = lexer;
-            this.$filter = $filter;
             this.options = options;
         };
-        Parser.ZERO = function () {
-            return 0;
-        };
-        Parser.prototype = {
-            constructor: Parser,
-            parse: function (text, json) {
+        AST.Program = 'Program';
+        AST.ExpressionStatement = 'ExpressionStatement';
+        AST.AssignmentExpression = 'AssignmentExpression';
+        AST.ConditionalExpression = 'ConditionalExpression';
+        AST.LogicalExpression = 'LogicalExpression';
+        AST.BinaryExpression = 'BinaryExpression';
+        AST.UnaryExpression = 'UnaryExpression';
+        AST.CallExpression = 'CallExpression';
+        AST.MemberExpression = 'MemberExpression';
+        AST.Identifier = 'Identifier';
+        AST.Literal = 'Literal';
+        AST.ArrayExpression = 'ArrayExpression';
+        AST.Property = 'Property';
+        AST.ObjectExpression = 'ObjectExpression';
+        AST.ThisExpression = 'ThisExpression';
+        AST.LocalsExpression = 'LocalsExpression';
+        AST.NGValueParameter = 'NGValueParameter';
+        AST.prototype = {
+            ast: function (text) {
                 this.text = text;
-                this.json = json;
                 this.tokens = this.lexer.lex(text);
-                if (json) {
-                    this.assignment = this.logicalOR;
-                    this.functionCall = this.fieldAccess = this.objectIndex = this.filterChain = function () {
-                        this.throwError('is not valid json', {
-                            text: text,
-                            index: 0
-                        });
-                    };
-                }
-                var value = json ? this.primary() : this.statements();
+                var value = this.program();
                 if (this.tokens.length !== 0) {
                     this.throwError('is an unexpected token', this.tokens[0]);
                 }
-                value.literal = !!value.literal;
-                value.constant = !!value.constant;
                 return value;
+            },
+            program: function () {
+                var body = [];
+                while (true) {
+                    if (this.tokens.length > 0 && !this.peek('}', ')', ';', ']'))
+                        body.push(this.expressionStatement());
+                    if (!this.expect(';')) {
+                        return {
+                            type: AST.Program,
+                            body: body
+                        };
+                    }
+                }
+            },
+            expressionStatement: function () {
+                return {
+                    type: AST.ExpressionStatement,
+                    expression: this.filterChain()
+                };
+            },
+            filterChain: function () {
+                var left = this.expression();
+                var token;
+                while (token = this.expect('|')) {
+                    left = this.filter(left);
+                }
+                return left;
+            },
+            expression: function () {
+                return this.assignment();
+            },
+            assignment: function () {
+                var result = this.ternary();
+                if (this.expect('=')) {
+                    result = {
+                        type: AST.AssignmentExpression,
+                        left: result,
+                        right: this.assignment(),
+                        operator: '='
+                    };
+                }
+                return result;
+            },
+            ternary: function () {
+                var test = this.logicalOR();
+                var alternate;
+                var consequent;
+                if (this.expect('?')) {
+                    alternate = this.expression();
+                    if (this.consume(':')) {
+                        consequent = this.expression();
+                        return {
+                            type: AST.ConditionalExpression,
+                            test: test,
+                            alternate: alternate,
+                            consequent: consequent
+                        };
+                    }
+                }
+                return test;
+            },
+            logicalOR: function () {
+                var left = this.logicalAND();
+                while (this.expect('||')) {
+                    left = {
+                        type: AST.LogicalExpression,
+                        operator: '||',
+                        left: left,
+                        right: this.logicalAND()
+                    };
+                }
+                return left;
+            },
+            logicalAND: function () {
+                var left = this.equality();
+                while (this.expect('&&')) {
+                    left = {
+                        type: AST.LogicalExpression,
+                        operator: '&&',
+                        left: left,
+                        right: this.equality()
+                    };
+                }
+                return left;
+            },
+            equality: function () {
+                var left = this.relational();
+                var token;
+                while (token = this.expect('==', '!=', '===', '!==')) {
+                    left = {
+                        type: AST.BinaryExpression,
+                        operator: token.text,
+                        left: left,
+                        right: this.relational()
+                    };
+                }
+                return left;
+            },
+            relational: function () {
+                var left = this.additive();
+                var token;
+                while (token = this.expect('<', '>', '<=', '>=')) {
+                    left = {
+                        type: AST.BinaryExpression,
+                        operator: token.text,
+                        left: left,
+                        right: this.additive()
+                    };
+                }
+                return left;
+            },
+            additive: function () {
+                var left = this.multiplicative();
+                var token;
+                while (token = this.expect('+', '-')) {
+                    left = {
+                        type: AST.BinaryExpression,
+                        operator: token.text,
+                        left: left,
+                        right: this.multiplicative()
+                    };
+                }
+                return left;
+            },
+            multiplicative: function () {
+                var left = this.unary();
+                var token;
+                while (token = this.expect('*', '/', '%')) {
+                    left = {
+                        type: AST.BinaryExpression,
+                        operator: token.text,
+                        left: left,
+                        right: this.unary()
+                    };
+                }
+                return left;
+            },
+            unary: function () {
+                var token;
+                if (token = this.expect('+', '-', '!')) {
+                    return {
+                        type: AST.UnaryExpression,
+                        operator: token.text,
+                        prefix: true,
+                        argument: this.unary()
+                    };
+                } else {
+                    return this.primary();
+                }
             },
             primary: function () {
                 var primary;
@@ -4258,45 +6080,158 @@ define('angular', [], function () {
                     primary = this.arrayDeclaration();
                 } else if (this.expect('{')) {
                     primary = this.object();
+                } else if (this.selfReferential.hasOwnProperty(this.peek().text)) {
+                    primary = copy(this.selfReferential[this.consume().text]);
+                } else if (this.options.literals.hasOwnProperty(this.peek().text)) {
+                    primary = {
+                        type: AST.Literal,
+                        value: this.options.literals[this.consume().text]
+                    };
+                } else if (this.peek().identifier) {
+                    primary = this.identifier();
+                } else if (this.peek().constant) {
+                    primary = this.constant();
                 } else {
-                    var token = this.expect();
-                    primary = token.fn;
-                    if (!primary) {
-                        this.throwError('not a primary expression', token);
-                    }
-                    if (token.json) {
-                        primary.constant = true;
-                        primary.literal = true;
-                    }
+                    this.throwError('not a primary expression', this.peek());
                 }
-                var next, context;
+                var next;
                 while (next = this.expect('(', '[', '.')) {
                     if (next.text === '(') {
-                        primary = this.functionCall(primary, context);
-                        context = null;
+                        primary = {
+                            type: AST.CallExpression,
+                            callee: primary,
+                            arguments: this.parseArguments()
+                        };
+                        this.consume(')');
                     } else if (next.text === '[') {
-                        context = primary;
-                        primary = this.objectIndex(primary);
+                        primary = {
+                            type: AST.MemberExpression,
+                            object: primary,
+                            property: this.expression(),
+                            computed: true
+                        };
+                        this.consume(']');
                     } else if (next.text === '.') {
-                        context = primary;
-                        primary = this.fieldAccess(primary);
+                        primary = {
+                            type: AST.MemberExpression,
+                            object: primary,
+                            property: this.identifier(),
+                            computed: false
+                        };
                     } else {
                         this.throwError('IMPOSSIBLE');
                     }
                 }
                 return primary;
             },
+            filter: function (baseExpression) {
+                var args = [baseExpression];
+                var result = {
+                    type: AST.CallExpression,
+                    callee: this.identifier(),
+                    arguments: args,
+                    filter: true
+                };
+                while (this.expect(':')) {
+                    args.push(this.expression());
+                }
+                return result;
+            },
+            parseArguments: function () {
+                var args = [];
+                if (this.peekToken().text !== ')') {
+                    do {
+                        args.push(this.expression());
+                    } while (this.expect(','));
+                }
+                return args;
+            },
+            identifier: function () {
+                var token = this.consume();
+                if (!token.identifier) {
+                    this.throwError('is not a valid identifier', token);
+                }
+                return {
+                    type: AST.Identifier,
+                    name: token.text
+                };
+            },
+            constant: function () {
+                return {
+                    type: AST.Literal,
+                    value: this.consume().value
+                };
+            },
+            arrayDeclaration: function () {
+                var elements = [];
+                if (this.peekToken().text !== ']') {
+                    do {
+                        if (this.peek(']')) {
+                            break;
+                        }
+                        elements.push(this.expression());
+                    } while (this.expect(','));
+                }
+                this.consume(']');
+                return {
+                    type: AST.ArrayExpression,
+                    elements: elements
+                };
+            },
+            object: function () {
+                var properties = [], property;
+                if (this.peekToken().text !== '}') {
+                    do {
+                        if (this.peek('}')) {
+                            break;
+                        }
+                        property = {
+                            type: AST.Property,
+                            kind: 'init'
+                        };
+                        if (this.peek().constant) {
+                            property.key = this.constant();
+                        } else if (this.peek().identifier) {
+                            property.key = this.identifier();
+                        } else {
+                            this.throwError('invalid key', this.peek());
+                        }
+                        this.consume(':');
+                        property.value = this.expression();
+                        properties.push(property);
+                    } while (this.expect(','));
+                }
+                this.consume('}');
+                return {
+                    type: AST.ObjectExpression,
+                    properties: properties
+                };
+            },
             throwError: function (msg, token) {
                 throw $parseMinErr('syntax', 'Syntax Error: Token \'{0}\' {1} at column {2} of the expression [{3}] starting at [{4}].', token.text, msg, token.index + 1, this.text, this.text.substring(token.index));
             },
-            peekToken: function () {
-                if (this.tokens.length === 0)
+            consume: function (e1) {
+                if (this.tokens.length === 0) {
                     throw $parseMinErr('ueoe', 'Unexpected end of expression: {0}', this.text);
+                }
+                var token = this.expect(e1);
+                if (!token) {
+                    this.throwError('is unexpected, expecting [' + e1 + ']', this.peek());
+                }
+                return token;
+            },
+            peekToken: function () {
+                if (this.tokens.length === 0) {
+                    throw $parseMinErr('ueoe', 'Unexpected end of expression: {0}', this.text);
+                }
                 return this.tokens[0];
             },
             peek: function (e1, e2, e3, e4) {
-                if (this.tokens.length > 0) {
-                    var token = this.tokens[0];
+                return this.peekAhead(0, e1, e2, e3, e4);
+            },
+            peekAhead: function (i, e1, e2, e3, e4) {
+                if (this.tokens.length > i) {
+                    var token = this.tokens[i];
                     var t = token.text;
                     if (t === e1 || t === e2 || t === e3 || t === e4 || !e1 && !e2 && !e3 && !e4) {
                         return token;
@@ -4307,522 +6242,1245 @@ define('angular', [], function () {
             expect: function (e1, e2, e3, e4) {
                 var token = this.peek(e1, e2, e3, e4);
                 if (token) {
-                    if (this.json && !token.json) {
-                        this.throwError('is not valid json', token);
-                    }
                     this.tokens.shift();
                     return token;
                 }
                 return false;
             },
-            consume: function (e1) {
-                if (!this.expect(e1)) {
-                    this.throwError('is unexpected, expecting [' + e1 + ']', this.peek());
-                }
-            },
-            unaryFn: function (fn, right) {
-                return extend(function (self, locals) {
-                    return fn(self, locals, right);
-                }, { constant: right.constant });
-            },
-            ternaryFn: function (left, middle, right) {
-                return extend(function (self, locals) {
-                    return left(self, locals) ? middle(self, locals) : right(self, locals);
-                }, { constant: left.constant && middle.constant && right.constant });
-            },
-            binaryFn: function (left, fn, right) {
-                return extend(function (self, locals) {
-                    return fn(self, locals, left, right);
-                }, { constant: left.constant && right.constant });
-            },
-            statements: function () {
-                var statements = [];
-                while (true) {
-                    if (this.tokens.length > 0 && !this.peek('}', ')', ';', ']'))
-                        statements.push(this.filterChain());
-                    if (!this.expect(';')) {
-                        return statements.length === 1 ? statements[0] : function (self, locals) {
-                            var value;
-                            for (var i = 0; i < statements.length; i++) {
-                                var statement = statements[i];
-                                if (statement) {
-                                    value = statement(self, locals);
-                                }
-                            }
-                            return value;
-                        };
-                    }
-                }
-            },
-            filterChain: function () {
-                var left = this.expression();
-                var token;
-                while (true) {
-                    if (token = this.expect('|')) {
-                        left = this.binaryFn(left, token.fn, this.filter());
-                    } else {
-                        return left;
-                    }
-                }
-            },
-            filter: function () {
-                var token = this.expect();
-                var fn = this.$filter(token.text);
-                var argsFn = [];
-                while (true) {
-                    if (token = this.expect(':')) {
-                        argsFn.push(this.expression());
-                    } else {
-                        var fnInvoke = function (self, locals, input) {
-                            var args = [input];
-                            for (var i = 0; i < argsFn.length; i++) {
-                                args.push(argsFn[i](self, locals));
-                            }
-                            return fn.apply(self, args);
-                        };
-                        return function () {
-                            return fnInvoke;
-                        };
-                    }
-                }
-            },
-            expression: function () {
-                return this.assignment();
-            },
-            assignment: function () {
-                var left = this.ternary();
-                var right;
-                var token;
-                if (token = this.expect('=')) {
-                    if (!left.assign) {
-                        this.throwError('implies assignment but [' + this.text.substring(0, token.index) + '] can not be assigned to', token);
-                    }
-                    right = this.ternary();
-                    return function (scope, locals) {
-                        return left.assign(scope, right(scope, locals), locals);
-                    };
-                }
-                return left;
-            },
-            ternary: function () {
-                var left = this.logicalOR();
-                var middle;
-                var token;
-                if (token = this.expect('?')) {
-                    middle = this.ternary();
-                    if (token = this.expect(':')) {
-                        return this.ternaryFn(left, middle, this.ternary());
-                    } else {
-                        this.throwError('expected :', token);
-                    }
-                } else {
-                    return left;
-                }
-            },
-            logicalOR: function () {
-                var left = this.logicalAND();
-                var token;
-                while (true) {
-                    if (token = this.expect('||')) {
-                        left = this.binaryFn(left, token.fn, this.logicalAND());
-                    } else {
-                        return left;
-                    }
-                }
-            },
-            logicalAND: function () {
-                var left = this.equality();
-                var token;
-                if (token = this.expect('&&')) {
-                    left = this.binaryFn(left, token.fn, this.logicalAND());
-                }
-                return left;
-            },
-            equality: function () {
-                var left = this.relational();
-                var token;
-                if (token = this.expect('==', '!=', '===', '!==')) {
-                    left = this.binaryFn(left, token.fn, this.equality());
-                }
-                return left;
-            },
-            relational: function () {
-                var left = this.additive();
-                var token;
-                if (token = this.expect('<', '>', '<=', '>=')) {
-                    left = this.binaryFn(left, token.fn, this.relational());
-                }
-                return left;
-            },
-            additive: function () {
-                var left = this.multiplicative();
-                var token;
-                while (token = this.expect('+', '-')) {
-                    left = this.binaryFn(left, token.fn, this.multiplicative());
-                }
-                return left;
-            },
-            multiplicative: function () {
-                var left = this.unary();
-                var token;
-                while (token = this.expect('*', '/', '%')) {
-                    left = this.binaryFn(left, token.fn, this.unary());
-                }
-                return left;
-            },
-            unary: function () {
-                var token;
-                if (this.expect('+')) {
-                    return this.primary();
-                } else if (token = this.expect('-')) {
-                    return this.binaryFn(Parser.ZERO, token.fn, this.unary());
-                } else if (token = this.expect('!')) {
-                    return this.unaryFn(token.fn, this.unary());
-                } else {
-                    return this.primary();
-                }
-            },
-            fieldAccess: function (object) {
-                var parser = this;
-                var field = this.expect().text;
-                var getter = getterFn(field, this.options, this.text);
-                return extend(function (scope, locals, self) {
-                    return getter(self || object(scope, locals), locals);
-                }, {
-                    assign: function (scope, value, locals) {
-                        return setter(object(scope, locals), field, value, parser.text, parser.options);
-                    }
-                });
-            },
-            objectIndex: function (obj) {
-                var parser = this;
-                var indexFn = this.expression();
-                this.consume(']');
-                return extend(function (self, locals) {
-                    var o = obj(self, locals), i = indexFn(self, locals), v, p;
-                    if (!o)
-                        return undefined;
-                    v = ensureSafeObject(o[i], parser.text);
-                    if (v && v.then && parser.options.unwrapPromises) {
-                        p = v;
-                        if (!('$$v' in v)) {
-                            p.$$v = undefined;
-                            p.then(function (val) {
-                                p.$$v = val;
-                            });
-                        }
-                        v = v.$$v;
-                    }
-                    return v;
-                }, {
-                    assign: function (self, value, locals) {
-                        var key = indexFn(self, locals);
-                        var safe = ensureSafeObject(obj(self, locals), parser.text);
-                        return safe[key] = value;
-                    }
-                });
-            },
-            functionCall: function (fn, contextGetter) {
-                var argsFn = [];
-                if (this.peekToken().text !== ')') {
-                    do {
-                        argsFn.push(this.expression());
-                    } while (this.expect(','));
-                }
-                this.consume(')');
-                var parser = this;
-                return function (scope, locals) {
-                    var args = [];
-                    var context = contextGetter ? contextGetter(scope, locals) : scope;
-                    for (var i = 0; i < argsFn.length; i++) {
-                        args.push(argsFn[i](scope, locals));
-                    }
-                    var fnPtr = fn(scope, locals, context) || noop;
-                    ensureSafeObject(context, parser.text);
-                    ensureSafeObject(fnPtr, parser.text);
-                    var v = fnPtr.apply ? fnPtr.apply(context, args) : fnPtr(args[0], args[1], args[2], args[3], args[4]);
-                    return ensureSafeObject(v, parser.text);
-                };
-            },
-            arrayDeclaration: function () {
-                var elementFns = [];
-                var allConstant = true;
-                if (this.peekToken().text !== ']') {
-                    do {
-                        var elementFn = this.expression();
-                        elementFns.push(elementFn);
-                        if (!elementFn.constant) {
-                            allConstant = false;
-                        }
-                    } while (this.expect(','));
-                }
-                this.consume(']');
-                return extend(function (self, locals) {
-                    var array = [];
-                    for (var i = 0; i < elementFns.length; i++) {
-                        array.push(elementFns[i](self, locals));
-                    }
-                    return array;
-                }, {
-                    literal: true,
-                    constant: allConstant
-                });
-            },
-            object: function () {
-                var keyValues = [];
-                var allConstant = true;
-                if (this.peekToken().text !== '}') {
-                    do {
-                        var token = this.expect(), key = token.string || token.text;
-                        this.consume(':');
-                        var value = this.expression();
-                        keyValues.push({
-                            key: key,
-                            value: value
-                        });
-                        if (!value.constant) {
-                            allConstant = false;
-                        }
-                    } while (this.expect(','));
-                }
-                this.consume('}');
-                return extend(function (self, locals) {
-                    var object = {};
-                    for (var i = 0; i < keyValues.length; i++) {
-                        var keyValue = keyValues[i];
-                        object[keyValue.key] = keyValue.value(self, locals);
-                    }
-                    return object;
-                }, {
-                    literal: true,
-                    constant: allConstant
-                });
+            selfReferential: {
+                'this': { type: AST.ThisExpression },
+                '$locals': { type: AST.LocalsExpression }
             }
         };
-        function setter(obj, path, setValue, fullExp, options) {
-            options = options || {};
-            var element = path.split('.'), key;
-            for (var i = 0; element.length > 1; i++) {
-                key = ensureSafeMemberName(element.shift(), fullExp);
-                var propertyObj = obj[key];
-                if (!propertyObj) {
-                    propertyObj = {};
-                    obj[key] = propertyObj;
+        function ifDefined(v, d) {
+            return typeof v !== 'undefined' ? v : d;
+        }
+        function plusFn(l, r) {
+            if (typeof l === 'undefined')
+                return r;
+            if (typeof r === 'undefined')
+                return l;
+            return l + r;
+        }
+        function isStateless($filter, filterName) {
+            var fn = $filter(filterName);
+            return !fn.$stateful;
+        }
+        function findConstantAndWatchExpressions(ast, $filter) {
+            var allConstants;
+            var argsToWatch;
+            switch (ast.type) {
+            case AST.Program:
+                allConstants = true;
+                forEach(ast.body, function (expr) {
+                    findConstantAndWatchExpressions(expr.expression, $filter);
+                    allConstants = allConstants && expr.expression.constant;
+                });
+                ast.constant = allConstants;
+                break;
+            case AST.Literal:
+                ast.constant = true;
+                ast.toWatch = [];
+                break;
+            case AST.UnaryExpression:
+                findConstantAndWatchExpressions(ast.argument, $filter);
+                ast.constant = ast.argument.constant;
+                ast.toWatch = ast.argument.toWatch;
+                break;
+            case AST.BinaryExpression:
+                findConstantAndWatchExpressions(ast.left, $filter);
+                findConstantAndWatchExpressions(ast.right, $filter);
+                ast.constant = ast.left.constant && ast.right.constant;
+                ast.toWatch = ast.left.toWatch.concat(ast.right.toWatch);
+                break;
+            case AST.LogicalExpression:
+                findConstantAndWatchExpressions(ast.left, $filter);
+                findConstantAndWatchExpressions(ast.right, $filter);
+                ast.constant = ast.left.constant && ast.right.constant;
+                ast.toWatch = ast.constant ? [] : [ast];
+                break;
+            case AST.ConditionalExpression:
+                findConstantAndWatchExpressions(ast.test, $filter);
+                findConstantAndWatchExpressions(ast.alternate, $filter);
+                findConstantAndWatchExpressions(ast.consequent, $filter);
+                ast.constant = ast.test.constant && ast.alternate.constant && ast.consequent.constant;
+                ast.toWatch = ast.constant ? [] : [ast];
+                break;
+            case AST.Identifier:
+                ast.constant = false;
+                ast.toWatch = [ast];
+                break;
+            case AST.MemberExpression:
+                findConstantAndWatchExpressions(ast.object, $filter);
+                if (ast.computed) {
+                    findConstantAndWatchExpressions(ast.property, $filter);
                 }
-                obj = propertyObj;
-                if (obj.then && options.unwrapPromises) {
-                    promiseWarning(fullExp);
-                    if (!('$$v' in obj)) {
-                        (function (promise) {
-                            promise.then(function (val) {
-                                promise.$$v = val;
+                ast.constant = ast.object.constant && (!ast.computed || ast.property.constant);
+                ast.toWatch = [ast];
+                break;
+            case AST.CallExpression:
+                allConstants = ast.filter ? isStateless($filter, ast.callee.name) : false;
+                argsToWatch = [];
+                forEach(ast.arguments, function (expr) {
+                    findConstantAndWatchExpressions(expr, $filter);
+                    allConstants = allConstants && expr.constant;
+                    if (!expr.constant) {
+                        argsToWatch.push.apply(argsToWatch, expr.toWatch);
+                    }
+                });
+                ast.constant = allConstants;
+                ast.toWatch = ast.filter && isStateless($filter, ast.callee.name) ? argsToWatch : [ast];
+                break;
+            case AST.AssignmentExpression:
+                findConstantAndWatchExpressions(ast.left, $filter);
+                findConstantAndWatchExpressions(ast.right, $filter);
+                ast.constant = ast.left.constant && ast.right.constant;
+                ast.toWatch = [ast];
+                break;
+            case AST.ArrayExpression:
+                allConstants = true;
+                argsToWatch = [];
+                forEach(ast.elements, function (expr) {
+                    findConstantAndWatchExpressions(expr, $filter);
+                    allConstants = allConstants && expr.constant;
+                    if (!expr.constant) {
+                        argsToWatch.push.apply(argsToWatch, expr.toWatch);
+                    }
+                });
+                ast.constant = allConstants;
+                ast.toWatch = argsToWatch;
+                break;
+            case AST.ObjectExpression:
+                allConstants = true;
+                argsToWatch = [];
+                forEach(ast.properties, function (property) {
+                    findConstantAndWatchExpressions(property.value, $filter);
+                    allConstants = allConstants && property.value.constant;
+                    if (!property.value.constant) {
+                        argsToWatch.push.apply(argsToWatch, property.value.toWatch);
+                    }
+                });
+                ast.constant = allConstants;
+                ast.toWatch = argsToWatch;
+                break;
+            case AST.ThisExpression:
+                ast.constant = false;
+                ast.toWatch = [];
+                break;
+            case AST.LocalsExpression:
+                ast.constant = false;
+                ast.toWatch = [];
+                break;
+            }
+        }
+        function getInputs(body) {
+            if (body.length != 1)
+                return;
+            var lastExpression = body[0].expression;
+            var candidate = lastExpression.toWatch;
+            if (candidate.length !== 1)
+                return candidate;
+            return candidate[0] !== lastExpression ? candidate : undefined;
+        }
+        function isAssignable(ast) {
+            return ast.type === AST.Identifier || ast.type === AST.MemberExpression;
+        }
+        function assignableAST(ast) {
+            if (ast.body.length === 1 && isAssignable(ast.body[0].expression)) {
+                return {
+                    type: AST.AssignmentExpression,
+                    left: ast.body[0].expression,
+                    right: { type: AST.NGValueParameter },
+                    operator: '='
+                };
+            }
+        }
+        function isLiteral(ast) {
+            return ast.body.length === 0 || ast.body.length === 1 && (ast.body[0].expression.type === AST.Literal || ast.body[0].expression.type === AST.ArrayExpression || ast.body[0].expression.type === AST.ObjectExpression);
+        }
+        function isConstant(ast) {
+            return ast.constant;
+        }
+        function ASTCompiler(astBuilder, $filter) {
+            this.astBuilder = astBuilder;
+            this.$filter = $filter;
+        }
+        ASTCompiler.prototype = {
+            compile: function (expression, expensiveChecks) {
+                var self = this;
+                var ast = this.astBuilder.ast(expression);
+                this.state = {
+                    nextId: 0,
+                    filters: {},
+                    expensiveChecks: expensiveChecks,
+                    fn: {
+                        vars: [],
+                        body: [],
+                        own: {}
+                    },
+                    assign: {
+                        vars: [],
+                        body: [],
+                        own: {}
+                    },
+                    inputs: []
+                };
+                findConstantAndWatchExpressions(ast, self.$filter);
+                var extra = '';
+                var assignable;
+                this.stage = 'assign';
+                if (assignable = assignableAST(ast)) {
+                    this.state.computing = 'assign';
+                    var result = this.nextId();
+                    this.recurse(assignable, result);
+                    this.return_(result);
+                    extra = 'fn.assign=' + this.generateFunction('assign', 's,v,l');
+                }
+                var toWatch = getInputs(ast.body);
+                self.stage = 'inputs';
+                forEach(toWatch, function (watch, key) {
+                    var fnKey = 'fn' + key;
+                    self.state[fnKey] = {
+                        vars: [],
+                        body: [],
+                        own: {}
+                    };
+                    self.state.computing = fnKey;
+                    var intoId = self.nextId();
+                    self.recurse(watch, intoId);
+                    self.return_(intoId);
+                    self.state.inputs.push(fnKey);
+                    watch.watchId = key;
+                });
+                this.state.computing = 'fn';
+                this.stage = 'main';
+                this.recurse(ast);
+                var fnString = '"' + this.USE + ' ' + this.STRICT + '";\n' + this.filterPrefix() + 'var fn=' + this.generateFunction('fn', 's,l,a,i') + extra + this.watchFns() + 'return fn;';
+                var fn = new Function('$filter', 'ensureSafeMemberName', 'ensureSafeObject', 'ensureSafeFunction', 'getStringValue', 'ensureSafeAssignContext', 'ifDefined', 'plus', 'text', fnString)(this.$filter, ensureSafeMemberName, ensureSafeObject, ensureSafeFunction, getStringValue, ensureSafeAssignContext, ifDefined, plusFn, expression);
+                this.state = this.stage = undefined;
+                fn.literal = isLiteral(ast);
+                fn.constant = isConstant(ast);
+                return fn;
+            },
+            USE: 'use',
+            STRICT: 'strict',
+            watchFns: function () {
+                var result = [];
+                var fns = this.state.inputs;
+                var self = this;
+                forEach(fns, function (name) {
+                    result.push('var ' + name + '=' + self.generateFunction(name, 's'));
+                });
+                if (fns.length) {
+                    result.push('fn.inputs=[' + fns.join(',') + '];');
+                }
+                return result.join('');
+            },
+            generateFunction: function (name, params) {
+                return 'function(' + params + '){' + this.varsPrefix(name) + this.body(name) + '};';
+            },
+            filterPrefix: function () {
+                var parts = [];
+                var self = this;
+                forEach(this.state.filters, function (id, filter) {
+                    parts.push(id + '=$filter(' + self.escape(filter) + ')');
+                });
+                if (parts.length)
+                    return 'var ' + parts.join(',') + ';';
+                return '';
+            },
+            varsPrefix: function (section) {
+                return this.state[section].vars.length ? 'var ' + this.state[section].vars.join(',') + ';' : '';
+            },
+            body: function (section) {
+                return this.state[section].body.join('');
+            },
+            recurse: function (ast, intoId, nameId, recursionFn, create, skipWatchIdCheck) {
+                var left, right, self = this, args, expression;
+                recursionFn = recursionFn || noop;
+                if (!skipWatchIdCheck && isDefined(ast.watchId)) {
+                    intoId = intoId || this.nextId();
+                    this.if_('i', this.lazyAssign(intoId, this.computedMember('i', ast.watchId)), this.lazyRecurse(ast, intoId, nameId, recursionFn, create, true));
+                    return;
+                }
+                switch (ast.type) {
+                case AST.Program:
+                    forEach(ast.body, function (expression, pos) {
+                        self.recurse(expression.expression, undefined, undefined, function (expr) {
+                            right = expr;
+                        });
+                        if (pos !== ast.body.length - 1) {
+                            self.current().body.push(right, ';');
+                        } else {
+                            self.return_(right);
+                        }
+                    });
+                    break;
+                case AST.Literal:
+                    expression = this.escape(ast.value);
+                    this.assign(intoId, expression);
+                    recursionFn(expression);
+                    break;
+                case AST.UnaryExpression:
+                    this.recurse(ast.argument, undefined, undefined, function (expr) {
+                        right = expr;
+                    });
+                    expression = ast.operator + '(' + this.ifDefined(right, 0) + ')';
+                    this.assign(intoId, expression);
+                    recursionFn(expression);
+                    break;
+                case AST.BinaryExpression:
+                    this.recurse(ast.left, undefined, undefined, function (expr) {
+                        left = expr;
+                    });
+                    this.recurse(ast.right, undefined, undefined, function (expr) {
+                        right = expr;
+                    });
+                    if (ast.operator === '+') {
+                        expression = this.plus(left, right);
+                    } else if (ast.operator === '-') {
+                        expression = this.ifDefined(left, 0) + ast.operator + this.ifDefined(right, 0);
+                    } else {
+                        expression = '(' + left + ')' + ast.operator + '(' + right + ')';
+                    }
+                    this.assign(intoId, expression);
+                    recursionFn(expression);
+                    break;
+                case AST.LogicalExpression:
+                    intoId = intoId || this.nextId();
+                    self.recurse(ast.left, intoId);
+                    self.if_(ast.operator === '&&' ? intoId : self.not(intoId), self.lazyRecurse(ast.right, intoId));
+                    recursionFn(intoId);
+                    break;
+                case AST.ConditionalExpression:
+                    intoId = intoId || this.nextId();
+                    self.recurse(ast.test, intoId);
+                    self.if_(intoId, self.lazyRecurse(ast.alternate, intoId), self.lazyRecurse(ast.consequent, intoId));
+                    recursionFn(intoId);
+                    break;
+                case AST.Identifier:
+                    intoId = intoId || this.nextId();
+                    if (nameId) {
+                        nameId.context = self.stage === 'inputs' ? 's' : this.assign(this.nextId(), this.getHasOwnProperty('l', ast.name) + '?l:s');
+                        nameId.computed = false;
+                        nameId.name = ast.name;
+                    }
+                    ensureSafeMemberName(ast.name);
+                    self.if_(self.stage === 'inputs' || self.not(self.getHasOwnProperty('l', ast.name)), function () {
+                        self.if_(self.stage === 'inputs' || 's', function () {
+                            if (create && create !== 1) {
+                                self.if_(self.not(self.nonComputedMember('s', ast.name)), self.lazyAssign(self.nonComputedMember('s', ast.name), '{}'));
+                            }
+                            self.assign(intoId, self.nonComputedMember('s', ast.name));
+                        });
+                    }, intoId && self.lazyAssign(intoId, self.nonComputedMember('l', ast.name)));
+                    if (self.state.expensiveChecks || isPossiblyDangerousMemberName(ast.name)) {
+                        self.addEnsureSafeObject(intoId);
+                    }
+                    recursionFn(intoId);
+                    break;
+                case AST.MemberExpression:
+                    left = nameId && (nameId.context = this.nextId()) || this.nextId();
+                    intoId = intoId || this.nextId();
+                    self.recurse(ast.object, left, undefined, function () {
+                        self.if_(self.notNull(left), function () {
+                            if (create && create !== 1) {
+                                self.addEnsureSafeAssignContext(left);
+                            }
+                            if (ast.computed) {
+                                right = self.nextId();
+                                self.recurse(ast.property, right);
+                                self.getStringValue(right);
+                                self.addEnsureSafeMemberName(right);
+                                if (create && create !== 1) {
+                                    self.if_(self.not(self.computedMember(left, right)), self.lazyAssign(self.computedMember(left, right), '{}'));
+                                }
+                                expression = self.ensureSafeObject(self.computedMember(left, right));
+                                self.assign(intoId, expression);
+                                if (nameId) {
+                                    nameId.computed = true;
+                                    nameId.name = right;
+                                }
+                            } else {
+                                ensureSafeMemberName(ast.property.name);
+                                if (create && create !== 1) {
+                                    self.if_(self.not(self.nonComputedMember(left, ast.property.name)), self.lazyAssign(self.nonComputedMember(left, ast.property.name), '{}'));
+                                }
+                                expression = self.nonComputedMember(left, ast.property.name);
+                                if (self.state.expensiveChecks || isPossiblyDangerousMemberName(ast.property.name)) {
+                                    expression = self.ensureSafeObject(expression);
+                                }
+                                self.assign(intoId, expression);
+                                if (nameId) {
+                                    nameId.computed = false;
+                                    nameId.name = ast.property.name;
+                                }
+                            }
+                        }, function () {
+                            self.assign(intoId, 'undefined');
+                        });
+                        recursionFn(intoId);
+                    }, !!create);
+                    break;
+                case AST.CallExpression:
+                    intoId = intoId || this.nextId();
+                    if (ast.filter) {
+                        right = self.filter(ast.callee.name);
+                        args = [];
+                        forEach(ast.arguments, function (expr) {
+                            var argument = self.nextId();
+                            self.recurse(expr, argument);
+                            args.push(argument);
+                        });
+                        expression = right + '(' + args.join(',') + ')';
+                        self.assign(intoId, expression);
+                        recursionFn(intoId);
+                    } else {
+                        right = self.nextId();
+                        left = {};
+                        args = [];
+                        self.recurse(ast.callee, right, left, function () {
+                            self.if_(self.notNull(right), function () {
+                                self.addEnsureSafeFunction(right);
+                                forEach(ast.arguments, function (expr) {
+                                    self.recurse(expr, self.nextId(), undefined, function (argument) {
+                                        args.push(self.ensureSafeObject(argument));
+                                    });
+                                });
+                                if (left.name) {
+                                    if (!self.state.expensiveChecks) {
+                                        self.addEnsureSafeObject(left.context);
+                                    }
+                                    expression = self.member(left.context, left.name, left.computed) + '(' + args.join(',') + ')';
+                                } else {
+                                    expression = right + '(' + args.join(',') + ')';
+                                }
+                                expression = self.ensureSafeObject(expression);
+                                self.assign(intoId, expression);
+                            }, function () {
+                                self.assign(intoId, 'undefined');
                             });
-                        }(obj));
-                    }
-                    if (obj.$$v === undefined) {
-                        obj.$$v = {};
-                    }
-                    obj = obj.$$v;
-                }
-            }
-            key = ensureSafeMemberName(element.shift(), fullExp);
-            obj[key] = setValue;
-            return setValue;
-        }
-        var getterFnCache = {};
-        function cspSafeGetterFn(key0, key1, key2, key3, key4, fullExp, options) {
-            ensureSafeMemberName(key0, fullExp);
-            ensureSafeMemberName(key1, fullExp);
-            ensureSafeMemberName(key2, fullExp);
-            ensureSafeMemberName(key3, fullExp);
-            ensureSafeMemberName(key4, fullExp);
-            return !options.unwrapPromises ? function cspSafeGetter(scope, locals) {
-                var pathVal = locals && locals.hasOwnProperty(key0) ? locals : scope;
-                if (pathVal === null || pathVal === undefined)
-                    return pathVal;
-                pathVal = pathVal[key0];
-                if (!key1 || pathVal === null || pathVal === undefined)
-                    return pathVal;
-                pathVal = pathVal[key1];
-                if (!key2 || pathVal === null || pathVal === undefined)
-                    return pathVal;
-                pathVal = pathVal[key2];
-                if (!key3 || pathVal === null || pathVal === undefined)
-                    return pathVal;
-                pathVal = pathVal[key3];
-                if (!key4 || pathVal === null || pathVal === undefined)
-                    return pathVal;
-                pathVal = pathVal[key4];
-                return pathVal;
-            } : function cspSafePromiseEnabledGetter(scope, locals) {
-                var pathVal = locals && locals.hasOwnProperty(key0) ? locals : scope, promise;
-                if (pathVal === null || pathVal === undefined)
-                    return pathVal;
-                pathVal = pathVal[key0];
-                if (pathVal && pathVal.then) {
-                    promiseWarning(fullExp);
-                    if (!('$$v' in pathVal)) {
-                        promise = pathVal;
-                        promise.$$v = undefined;
-                        promise.then(function (val) {
-                            promise.$$v = val;
+                            recursionFn(intoId);
                         });
                     }
-                    pathVal = pathVal.$$v;
-                }
-                if (!key1 || pathVal === null || pathVal === undefined)
-                    return pathVal;
-                pathVal = pathVal[key1];
-                if (pathVal && pathVal.then) {
-                    promiseWarning(fullExp);
-                    if (!('$$v' in pathVal)) {
-                        promise = pathVal;
-                        promise.$$v = undefined;
-                        promise.then(function (val) {
-                            promise.$$v = val;
-                        });
+                    break;
+                case AST.AssignmentExpression:
+                    right = this.nextId();
+                    left = {};
+                    if (!isAssignable(ast.left)) {
+                        throw $parseMinErr('lval', 'Trying to assign a value to a non l-value');
                     }
-                    pathVal = pathVal.$$v;
-                }
-                if (!key2 || pathVal === null || pathVal === undefined)
-                    return pathVal;
-                pathVal = pathVal[key2];
-                if (pathVal && pathVal.then) {
-                    promiseWarning(fullExp);
-                    if (!('$$v' in pathVal)) {
-                        promise = pathVal;
-                        promise.$$v = undefined;
-                        promise.then(function (val) {
-                            promise.$$v = val;
+                    this.recurse(ast.left, undefined, left, function () {
+                        self.if_(self.notNull(left.context), function () {
+                            self.recurse(ast.right, right);
+                            self.addEnsureSafeObject(self.member(left.context, left.name, left.computed));
+                            self.addEnsureSafeAssignContext(left.context);
+                            expression = self.member(left.context, left.name, left.computed) + ast.operator + right;
+                            self.assign(intoId, expression);
+                            recursionFn(intoId || expression);
                         });
-                    }
-                    pathVal = pathVal.$$v;
-                }
-                if (!key3 || pathVal === null || pathVal === undefined)
-                    return pathVal;
-                pathVal = pathVal[key3];
-                if (pathVal && pathVal.then) {
-                    promiseWarning(fullExp);
-                    if (!('$$v' in pathVal)) {
-                        promise = pathVal;
-                        promise.$$v = undefined;
-                        promise.then(function (val) {
-                            promise.$$v = val;
+                    }, 1);
+                    break;
+                case AST.ArrayExpression:
+                    args = [];
+                    forEach(ast.elements, function (expr) {
+                        self.recurse(expr, self.nextId(), undefined, function (argument) {
+                            args.push(argument);
                         });
-                    }
-                    pathVal = pathVal.$$v;
-                }
-                if (!key4 || pathVal === null || pathVal === undefined)
-                    return pathVal;
-                pathVal = pathVal[key4];
-                if (pathVal && pathVal.then) {
-                    promiseWarning(fullExp);
-                    if (!('$$v' in pathVal)) {
-                        promise = pathVal;
-                        promise.$$v = undefined;
-                        promise.then(function (val) {
-                            promise.$$v = val;
+                    });
+                    expression = '[' + args.join(',') + ']';
+                    this.assign(intoId, expression);
+                    recursionFn(expression);
+                    break;
+                case AST.ObjectExpression:
+                    args = [];
+                    forEach(ast.properties, function (property) {
+                        self.recurse(property.value, self.nextId(), undefined, function (expr) {
+                            args.push(self.escape(property.key.type === AST.Identifier ? property.key.name : '' + property.key.value) + ':' + expr);
                         });
-                    }
-                    pathVal = pathVal.$$v;
+                    });
+                    expression = '{' + args.join(',') + '}';
+                    this.assign(intoId, expression);
+                    recursionFn(expression);
+                    break;
+                case AST.ThisExpression:
+                    this.assign(intoId, 's');
+                    recursionFn('s');
+                    break;
+                case AST.LocalsExpression:
+                    this.assign(intoId, 'l');
+                    recursionFn('l');
+                    break;
+                case AST.NGValueParameter:
+                    this.assign(intoId, 'v');
+                    recursionFn('v');
+                    break;
                 }
-                return pathVal;
-            };
-        }
-        function getterFn(path, options, fullExp) {
-            if (getterFnCache.hasOwnProperty(path)) {
-                return getterFnCache[path];
-            }
-            var pathKeys = path.split('.'), pathKeysLength = pathKeys.length, fn;
-            if (options.csp) {
-                if (pathKeysLength < 6) {
-                    fn = cspSafeGetterFn(pathKeys[0], pathKeys[1], pathKeys[2], pathKeys[3], pathKeys[4], fullExp, options);
+            },
+            getHasOwnProperty: function (element, property) {
+                var key = element + '.' + property;
+                var own = this.current().own;
+                if (!own.hasOwnProperty(key)) {
+                    own[key] = this.nextId(false, element + '&&(' + this.escape(property) + ' in ' + element + ')');
+                }
+                return own[key];
+            },
+            assign: function (id, value) {
+                if (!id)
+                    return;
+                this.current().body.push(id, '=', value, ';');
+                return id;
+            },
+            filter: function (filterName) {
+                if (!this.state.filters.hasOwnProperty(filterName)) {
+                    this.state.filters[filterName] = this.nextId(true);
+                }
+                return this.state.filters[filterName];
+            },
+            ifDefined: function (id, defaultValue) {
+                return 'ifDefined(' + id + ',' + this.escape(defaultValue) + ')';
+            },
+            plus: function (left, right) {
+                return 'plus(' + left + ',' + right + ')';
+            },
+            return_: function (id) {
+                this.current().body.push('return ', id, ';');
+            },
+            if_: function (test, alternate, consequent) {
+                if (test === true) {
+                    alternate();
                 } else {
-                    fn = function (scope, locals) {
-                        var i = 0, val;
-                        do {
-                            val = cspSafeGetterFn(pathKeys[i++], pathKeys[i++], pathKeys[i++], pathKeys[i++], pathKeys[i++], fullExp, options)(scope, locals);
-                            locals = undefined;
-                            scope = val;
-                        } while (i < pathKeysLength);
-                        return val;
+                    var body = this.current().body;
+                    body.push('if(', test, '){');
+                    alternate();
+                    body.push('}');
+                    if (consequent) {
+                        body.push('else{');
+                        consequent();
+                        body.push('}');
+                    }
+                }
+            },
+            not: function (expression) {
+                return '!(' + expression + ')';
+            },
+            notNull: function (expression) {
+                return expression + '!=null';
+            },
+            nonComputedMember: function (left, right) {
+                var SAFE_IDENTIFIER = /[$_a-zA-Z][$_a-zA-Z0-9]*/;
+                var UNSAFE_CHARACTERS = /[^$_a-zA-Z0-9]/g;
+                if (SAFE_IDENTIFIER.test(right)) {
+                    return left + '.' + right;
+                } else {
+                    return left + '["' + right.replace(UNSAFE_CHARACTERS, this.stringEscapeFn) + '"]';
+                }
+            },
+            computedMember: function (left, right) {
+                return left + '[' + right + ']';
+            },
+            member: function (left, right, computed) {
+                if (computed)
+                    return this.computedMember(left, right);
+                return this.nonComputedMember(left, right);
+            },
+            addEnsureSafeObject: function (item) {
+                this.current().body.push(this.ensureSafeObject(item), ';');
+            },
+            addEnsureSafeMemberName: function (item) {
+                this.current().body.push(this.ensureSafeMemberName(item), ';');
+            },
+            addEnsureSafeFunction: function (item) {
+                this.current().body.push(this.ensureSafeFunction(item), ';');
+            },
+            addEnsureSafeAssignContext: function (item) {
+                this.current().body.push(this.ensureSafeAssignContext(item), ';');
+            },
+            ensureSafeObject: function (item) {
+                return 'ensureSafeObject(' + item + ',text)';
+            },
+            ensureSafeMemberName: function (item) {
+                return 'ensureSafeMemberName(' + item + ',text)';
+            },
+            ensureSafeFunction: function (item) {
+                return 'ensureSafeFunction(' + item + ',text)';
+            },
+            getStringValue: function (item) {
+                this.assign(item, 'getStringValue(' + item + ')');
+            },
+            ensureSafeAssignContext: function (item) {
+                return 'ensureSafeAssignContext(' + item + ',text)';
+            },
+            lazyRecurse: function (ast, intoId, nameId, recursionFn, create, skipWatchIdCheck) {
+                var self = this;
+                return function () {
+                    self.recurse(ast, intoId, nameId, recursionFn, create, skipWatchIdCheck);
+                };
+            },
+            lazyAssign: function (id, value) {
+                var self = this;
+                return function () {
+                    self.assign(id, value);
+                };
+            },
+            stringEscapeRegex: /[^ a-zA-Z0-9]/g,
+            stringEscapeFn: function (c) {
+                return '\\u' + ('0000' + c.charCodeAt(0).toString(16)).slice(-4);
+            },
+            escape: function (value) {
+                if (isString(value))
+                    return '\'' + value.replace(this.stringEscapeRegex, this.stringEscapeFn) + '\'';
+                if (isNumber(value))
+                    return value.toString();
+                if (value === true)
+                    return 'true';
+                if (value === false)
+                    return 'false';
+                if (value === null)
+                    return 'null';
+                if (typeof value === 'undefined')
+                    return 'undefined';
+                throw $parseMinErr('esc', 'IMPOSSIBLE');
+            },
+            nextId: function (skip, init) {
+                var id = 'v' + this.state.nextId++;
+                if (!skip) {
+                    this.current().vars.push(id + (init ? '=' + init : ''));
+                }
+                return id;
+            },
+            current: function () {
+                return this.state[this.state.computing];
+            }
+        };
+        function ASTInterpreter(astBuilder, $filter) {
+            this.astBuilder = astBuilder;
+            this.$filter = $filter;
+        }
+        ASTInterpreter.prototype = {
+            compile: function (expression, expensiveChecks) {
+                var self = this;
+                var ast = this.astBuilder.ast(expression);
+                this.expression = expression;
+                this.expensiveChecks = expensiveChecks;
+                findConstantAndWatchExpressions(ast, self.$filter);
+                var assignable;
+                var assign;
+                if (assignable = assignableAST(ast)) {
+                    assign = this.recurse(assignable);
+                }
+                var toWatch = getInputs(ast.body);
+                var inputs;
+                if (toWatch) {
+                    inputs = [];
+                    forEach(toWatch, function (watch, key) {
+                        var input = self.recurse(watch);
+                        watch.input = input;
+                        inputs.push(input);
+                        watch.watchId = key;
+                    });
+                }
+                var expressions = [];
+                forEach(ast.body, function (expression) {
+                    expressions.push(self.recurse(expression.expression));
+                });
+                var fn = ast.body.length === 0 ? noop : ast.body.length === 1 ? expressions[0] : function (scope, locals) {
+                    var lastValue;
+                    forEach(expressions, function (exp) {
+                        lastValue = exp(scope, locals);
+                    });
+                    return lastValue;
+                };
+                if (assign) {
+                    fn.assign = function (scope, value, locals) {
+                        return assign(scope, locals, value);
                     };
                 }
-            } else {
-                var code = 'var l, fn, p;\n';
-                forEach(pathKeys, function (key, index) {
-                    ensureSafeMemberName(key, fullExp);
-                    code += 'if(s === null || s === undefined) return s;\n' + 'l=s;\n' + 's=' + (index ? 's' : '((k&&k.hasOwnProperty("' + key + '"))?k:s)') + '["' + key + '"]' + ';\n' + (options.unwrapPromises ? 'if (s && s.then) {\n' + ' pw("' + fullExp.replace(/(["\r\n])/g, '\\$1') + '");\n' + ' if (!("$$v" in s)) {\n' + ' p=s;\n' + ' p.$$v = undefined;\n' + ' p.then(function(v) {p.$$v=v;});\n' + '}\n' + ' s=s.$$v\n' + '}\n' : '');
-                });
-                code += 'return s;';
-                var evaledFnGetter = new Function('s', 'k', 'pw', code);
-                evaledFnGetter.toString = function () {
-                    return code;
+                if (inputs) {
+                    fn.inputs = inputs;
+                }
+                fn.literal = isLiteral(ast);
+                fn.constant = isConstant(ast);
+                return fn;
+            },
+            recurse: function (ast, context, create) {
+                var left, right, self = this, args, expression;
+                if (ast.input) {
+                    return this.inputs(ast.input, ast.watchId);
+                }
+                switch (ast.type) {
+                case AST.Literal:
+                    return this.value(ast.value, context);
+                case AST.UnaryExpression:
+                    right = this.recurse(ast.argument);
+                    return this['unary' + ast.operator](right, context);
+                case AST.BinaryExpression:
+                    left = this.recurse(ast.left);
+                    right = this.recurse(ast.right);
+                    return this['binary' + ast.operator](left, right, context);
+                case AST.LogicalExpression:
+                    left = this.recurse(ast.left);
+                    right = this.recurse(ast.right);
+                    return this['binary' + ast.operator](left, right, context);
+                case AST.ConditionalExpression:
+                    return this['ternary?:'](this.recurse(ast.test), this.recurse(ast.alternate), this.recurse(ast.consequent), context);
+                case AST.Identifier:
+                    ensureSafeMemberName(ast.name, self.expression);
+                    return self.identifier(ast.name, self.expensiveChecks || isPossiblyDangerousMemberName(ast.name), context, create, self.expression);
+                case AST.MemberExpression:
+                    left = this.recurse(ast.object, false, !!create);
+                    if (!ast.computed) {
+                        ensureSafeMemberName(ast.property.name, self.expression);
+                        right = ast.property.name;
+                    }
+                    if (ast.computed)
+                        right = this.recurse(ast.property);
+                    return ast.computed ? this.computedMember(left, right, context, create, self.expression) : this.nonComputedMember(left, right, self.expensiveChecks, context, create, self.expression);
+                case AST.CallExpression:
+                    args = [];
+                    forEach(ast.arguments, function (expr) {
+                        args.push(self.recurse(expr));
+                    });
+                    if (ast.filter)
+                        right = this.$filter(ast.callee.name);
+                    if (!ast.filter)
+                        right = this.recurse(ast.callee, true);
+                    return ast.filter ? function (scope, locals, assign, inputs) {
+                        var values = [];
+                        for (var i = 0; i < args.length; ++i) {
+                            values.push(args[i](scope, locals, assign, inputs));
+                        }
+                        var value = right.apply(undefined, values, inputs);
+                        return context ? {
+                            context: undefined,
+                            name: undefined,
+                            value: value
+                        } : value;
+                    } : function (scope, locals, assign, inputs) {
+                        var rhs = right(scope, locals, assign, inputs);
+                        var value;
+                        if (rhs.value != null) {
+                            ensureSafeObject(rhs.context, self.expression);
+                            ensureSafeFunction(rhs.value, self.expression);
+                            var values = [];
+                            for (var i = 0; i < args.length; ++i) {
+                                values.push(ensureSafeObject(args[i](scope, locals, assign, inputs), self.expression));
+                            }
+                            value = ensureSafeObject(rhs.value.apply(rhs.context, values), self.expression);
+                        }
+                        return context ? { value: value } : value;
+                    };
+                case AST.AssignmentExpression:
+                    left = this.recurse(ast.left, true, 1);
+                    right = this.recurse(ast.right);
+                    return function (scope, locals, assign, inputs) {
+                        var lhs = left(scope, locals, assign, inputs);
+                        var rhs = right(scope, locals, assign, inputs);
+                        ensureSafeObject(lhs.value, self.expression);
+                        ensureSafeAssignContext(lhs.context);
+                        lhs.context[lhs.name] = rhs;
+                        return context ? { value: rhs } : rhs;
+                    };
+                case AST.ArrayExpression:
+                    args = [];
+                    forEach(ast.elements, function (expr) {
+                        args.push(self.recurse(expr));
+                    });
+                    return function (scope, locals, assign, inputs) {
+                        var value = [];
+                        for (var i = 0; i < args.length; ++i) {
+                            value.push(args[i](scope, locals, assign, inputs));
+                        }
+                        return context ? { value: value } : value;
+                    };
+                case AST.ObjectExpression:
+                    args = [];
+                    forEach(ast.properties, function (property) {
+                        args.push({
+                            key: property.key.type === AST.Identifier ? property.key.name : '' + property.key.value,
+                            value: self.recurse(property.value)
+                        });
+                    });
+                    return function (scope, locals, assign, inputs) {
+                        var value = {};
+                        for (var i = 0; i < args.length; ++i) {
+                            value[args[i].key] = args[i].value(scope, locals, assign, inputs);
+                        }
+                        return context ? { value: value } : value;
+                    };
+                case AST.ThisExpression:
+                    return function (scope) {
+                        return context ? { value: scope } : scope;
+                    };
+                case AST.LocalsExpression:
+                    return function (scope, locals) {
+                        return context ? { value: locals } : locals;
+                    };
+                case AST.NGValueParameter:
+                    return function (scope, locals, assign) {
+                        return context ? { value: assign } : assign;
+                    };
+                }
+            },
+            'unary+': function (argument, context) {
+                return function (scope, locals, assign, inputs) {
+                    var arg = argument(scope, locals, assign, inputs);
+                    if (isDefined(arg)) {
+                        arg = +arg;
+                    } else {
+                        arg = 0;
+                    }
+                    return context ? { value: arg } : arg;
                 };
-                fn = function (scope, locals) {
-                    return evaledFnGetter(scope, locals, promiseWarning);
+            },
+            'unary-': function (argument, context) {
+                return function (scope, locals, assign, inputs) {
+                    var arg = argument(scope, locals, assign, inputs);
+                    if (isDefined(arg)) {
+                        arg = -arg;
+                    } else {
+                        arg = 0;
+                    }
+                    return context ? { value: arg } : arg;
+                };
+            },
+            'unary!': function (argument, context) {
+                return function (scope, locals, assign, inputs) {
+                    var arg = !argument(scope, locals, assign, inputs);
+                    return context ? { value: arg } : arg;
+                };
+            },
+            'binary+': function (left, right, context) {
+                return function (scope, locals, assign, inputs) {
+                    var lhs = left(scope, locals, assign, inputs);
+                    var rhs = right(scope, locals, assign, inputs);
+                    var arg = plusFn(lhs, rhs);
+                    return context ? { value: arg } : arg;
+                };
+            },
+            'binary-': function (left, right, context) {
+                return function (scope, locals, assign, inputs) {
+                    var lhs = left(scope, locals, assign, inputs);
+                    var rhs = right(scope, locals, assign, inputs);
+                    var arg = (isDefined(lhs) ? lhs : 0) - (isDefined(rhs) ? rhs : 0);
+                    return context ? { value: arg } : arg;
+                };
+            },
+            'binary*': function (left, right, context) {
+                return function (scope, locals, assign, inputs) {
+                    var arg = left(scope, locals, assign, inputs) * right(scope, locals, assign, inputs);
+                    return context ? { value: arg } : arg;
+                };
+            },
+            'binary/': function (left, right, context) {
+                return function (scope, locals, assign, inputs) {
+                    var arg = left(scope, locals, assign, inputs) / right(scope, locals, assign, inputs);
+                    return context ? { value: arg } : arg;
+                };
+            },
+            'binary%': function (left, right, context) {
+                return function (scope, locals, assign, inputs) {
+                    var arg = left(scope, locals, assign, inputs) % right(scope, locals, assign, inputs);
+                    return context ? { value: arg } : arg;
+                };
+            },
+            'binary===': function (left, right, context) {
+                return function (scope, locals, assign, inputs) {
+                    var arg = left(scope, locals, assign, inputs) === right(scope, locals, assign, inputs);
+                    return context ? { value: arg } : arg;
+                };
+            },
+            'binary!==': function (left, right, context) {
+                return function (scope, locals, assign, inputs) {
+                    var arg = left(scope, locals, assign, inputs) !== right(scope, locals, assign, inputs);
+                    return context ? { value: arg } : arg;
+                };
+            },
+            'binary==': function (left, right, context) {
+                return function (scope, locals, assign, inputs) {
+                    var arg = left(scope, locals, assign, inputs) == right(scope, locals, assign, inputs);
+                    return context ? { value: arg } : arg;
+                };
+            },
+            'binary!=': function (left, right, context) {
+                return function (scope, locals, assign, inputs) {
+                    var arg = left(scope, locals, assign, inputs) != right(scope, locals, assign, inputs);
+                    return context ? { value: arg } : arg;
+                };
+            },
+            'binary<': function (left, right, context) {
+                return function (scope, locals, assign, inputs) {
+                    var arg = left(scope, locals, assign, inputs) < right(scope, locals, assign, inputs);
+                    return context ? { value: arg } : arg;
+                };
+            },
+            'binary>': function (left, right, context) {
+                return function (scope, locals, assign, inputs) {
+                    var arg = left(scope, locals, assign, inputs) > right(scope, locals, assign, inputs);
+                    return context ? { value: arg } : arg;
+                };
+            },
+            'binary<=': function (left, right, context) {
+                return function (scope, locals, assign, inputs) {
+                    var arg = left(scope, locals, assign, inputs) <= right(scope, locals, assign, inputs);
+                    return context ? { value: arg } : arg;
+                };
+            },
+            'binary>=': function (left, right, context) {
+                return function (scope, locals, assign, inputs) {
+                    var arg = left(scope, locals, assign, inputs) >= right(scope, locals, assign, inputs);
+                    return context ? { value: arg } : arg;
+                };
+            },
+            'binary&&': function (left, right, context) {
+                return function (scope, locals, assign, inputs) {
+                    var arg = left(scope, locals, assign, inputs) && right(scope, locals, assign, inputs);
+                    return context ? { value: arg } : arg;
+                };
+            },
+            'binary||': function (left, right, context) {
+                return function (scope, locals, assign, inputs) {
+                    var arg = left(scope, locals, assign, inputs) || right(scope, locals, assign, inputs);
+                    return context ? { value: arg } : arg;
+                };
+            },
+            'ternary?:': function (test, alternate, consequent, context) {
+                return function (scope, locals, assign, inputs) {
+                    var arg = test(scope, locals, assign, inputs) ? alternate(scope, locals, assign, inputs) : consequent(scope, locals, assign, inputs);
+                    return context ? { value: arg } : arg;
+                };
+            },
+            value: function (value, context) {
+                return function () {
+                    return context ? {
+                        context: undefined,
+                        name: undefined,
+                        value: value
+                    } : value;
+                };
+            },
+            identifier: function (name, expensiveChecks, context, create, expression) {
+                return function (scope, locals, assign, inputs) {
+                    var base = locals && name in locals ? locals : scope;
+                    if (create && create !== 1 && base && !base[name]) {
+                        base[name] = {};
+                    }
+                    var value = base ? base[name] : undefined;
+                    if (expensiveChecks) {
+                        ensureSafeObject(value, expression);
+                    }
+                    if (context) {
+                        return {
+                            context: base,
+                            name: name,
+                            value: value
+                        };
+                    } else {
+                        return value;
+                    }
+                };
+            },
+            computedMember: function (left, right, context, create, expression) {
+                return function (scope, locals, assign, inputs) {
+                    var lhs = left(scope, locals, assign, inputs);
+                    var rhs;
+                    var value;
+                    if (lhs != null) {
+                        rhs = right(scope, locals, assign, inputs);
+                        rhs = getStringValue(rhs);
+                        ensureSafeMemberName(rhs, expression);
+                        if (create && create !== 1) {
+                            ensureSafeAssignContext(lhs);
+                            if (lhs && !lhs[rhs]) {
+                                lhs[rhs] = {};
+                            }
+                        }
+                        value = lhs[rhs];
+                        ensureSafeObject(value, expression);
+                    }
+                    if (context) {
+                        return {
+                            context: lhs,
+                            name: rhs,
+                            value: value
+                        };
+                    } else {
+                        return value;
+                    }
+                };
+            },
+            nonComputedMember: function (left, right, expensiveChecks, context, create, expression) {
+                return function (scope, locals, assign, inputs) {
+                    var lhs = left(scope, locals, assign, inputs);
+                    if (create && create !== 1) {
+                        ensureSafeAssignContext(lhs);
+                        if (lhs && !lhs[right]) {
+                            lhs[right] = {};
+                        }
+                    }
+                    var value = lhs != null ? lhs[right] : undefined;
+                    if (expensiveChecks || isPossiblyDangerousMemberName(right)) {
+                        ensureSafeObject(value, expression);
+                    }
+                    if (context) {
+                        return {
+                            context: lhs,
+                            name: right,
+                            value: value
+                        };
+                    } else {
+                        return value;
+                    }
+                };
+            },
+            inputs: function (input, watchId) {
+                return function (scope, value, locals, inputs) {
+                    if (inputs)
+                        return inputs[watchId];
+                    return input(scope, value, locals);
                 };
             }
-            if (path !== 'hasOwnProperty') {
-                getterFnCache[path] = fn;
+        };
+        var Parser = function (lexer, $filter, options) {
+            this.lexer = lexer;
+            this.$filter = $filter;
+            this.options = options;
+            this.ast = new AST(lexer, options);
+            this.astCompiler = options.csp ? new ASTInterpreter(this.ast, $filter) : new ASTCompiler(this.ast, $filter);
+        };
+        Parser.prototype = {
+            constructor: Parser,
+            parse: function (text) {
+                return this.astCompiler.compile(text, this.options.expensiveChecks);
             }
-            return fn;
+        };
+        function isPossiblyDangerousMemberName(name) {
+            return name == 'constructor';
+        }
+        var objectValueOf = Object.prototype.valueOf;
+        function getValueOf(value) {
+            return isFunction(value.valueOf) ? value.valueOf() : objectValueOf.call(value);
         }
         function $ParseProvider() {
-            var cache = {};
-            var $parseOptions = {
-                csp: false,
-                unwrapPromises: false,
-                logPromiseWarnings: true
+            var cacheDefault = createMap();
+            var cacheExpensive = createMap();
+            var literals = {
+                'true': true,
+                'false': false,
+                'null': null,
+                'undefined': undefined
             };
-            this.unwrapPromises = function (value) {
-                if (isDefined(value)) {
-                    $parseOptions.unwrapPromises = !!value;
-                    return this;
-                } else {
-                    return $parseOptions.unwrapPromises;
-                }
+            var identStart, identContinue;
+            this.addLiteral = function (literalName, literalValue) {
+                literals[literalName] = literalValue;
             };
-            this.logPromiseWarnings = function (value) {
-                if (isDefined(value)) {
-                    $parseOptions.logPromiseWarnings = value;
-                    return this;
-                } else {
-                    return $parseOptions.logPromiseWarnings;
-                }
+            this.setIdentifierFns = function (identifierStart, identifierContinue) {
+                identStart = identifierStart;
+                identContinue = identifierContinue;
+                return this;
             };
             this.$get = [
                 '$filter',
-                '$sniffer',
-                '$log',
-                function ($filter, $sniffer, $log) {
-                    $parseOptions.csp = $sniffer.csp;
-                    promiseWarning = function promiseWarningFn(fullExp) {
-                        if (!$parseOptions.logPromiseWarnings || promiseWarningCache.hasOwnProperty(fullExp))
-                            return;
-                        promiseWarningCache[fullExp] = true;
-                        $log.warn('[$parse] Promise found in the expression `' + fullExp + '`. ' + 'Automatic unwrapping of promises in Angular expressions is deprecated.');
+                function ($filter) {
+                    var noUnsafeEval = csp().noUnsafeEval;
+                    var $parseOptions = {
+                            csp: noUnsafeEval,
+                            expensiveChecks: false,
+                            literals: copy(literals),
+                            isIdentifierStart: isFunction(identStart) && identStart,
+                            isIdentifierContinue: isFunction(identContinue) && identContinue
+                        }, $parseOptionsExpensive = {
+                            csp: noUnsafeEval,
+                            expensiveChecks: true,
+                            literals: copy(literals),
+                            isIdentifierStart: isFunction(identStart) && identStart,
+                            isIdentifierContinue: isFunction(identContinue) && identContinue
+                        };
+                    var runningChecksEnabled = false;
+                    $parse.$$runningExpensiveChecks = function () {
+                        return runningChecksEnabled;
                     };
-                    return function (exp) {
-                        var parsedExpression;
+                    return $parse;
+                    function $parse(exp, interceptorFn, expensiveChecks) {
+                        var parsedExpression, oneTime, cacheKey;
+                        expensiveChecks = expensiveChecks || runningChecksEnabled;
                         switch (typeof exp) {
                         case 'string':
-                            if (cache.hasOwnProperty(exp)) {
-                                return cache[exp];
+                            exp = exp.trim();
+                            cacheKey = exp;
+                            var cache = expensiveChecks ? cacheExpensive : cacheDefault;
+                            parsedExpression = cache[cacheKey];
+                            if (!parsedExpression) {
+                                if (exp.charAt(0) === ':' && exp.charAt(1) === ':') {
+                                    oneTime = true;
+                                    exp = exp.substring(2);
+                                }
+                                var parseOptions = expensiveChecks ? $parseOptionsExpensive : $parseOptions;
+                                var lexer = new Lexer(parseOptions);
+                                var parser = new Parser(lexer, $filter, parseOptions);
+                                parsedExpression = parser.parse(exp);
+                                if (parsedExpression.constant) {
+                                    parsedExpression.$$watchDelegate = constantWatchDelegate;
+                                } else if (oneTime) {
+                                    parsedExpression.$$watchDelegate = parsedExpression.literal ? oneTimeLiteralWatchDelegate : oneTimeWatchDelegate;
+                                } else if (parsedExpression.inputs) {
+                                    parsedExpression.$$watchDelegate = inputsWatchDelegate;
+                                }
+                                if (expensiveChecks) {
+                                    parsedExpression = expensiveChecksInterceptor(parsedExpression);
+                                }
+                                cache[cacheKey] = parsedExpression;
                             }
-                            var lexer = new Lexer($parseOptions);
-                            var parser = new Parser(lexer, $filter, $parseOptions);
-                            parsedExpression = parser.parse(exp, false);
-                            if (exp !== 'hasOwnProperty') {
-                                cache[exp] = parsedExpression;
-                            }
-                            return parsedExpression;
+                            return addInterceptor(parsedExpression, interceptorFn);
                         case 'function':
-                            return exp;
+                            return addInterceptor(exp, interceptorFn);
                         default:
-                            return noop;
+                            return addInterceptor(noop, interceptorFn);
                         }
-                    };
+                    }
+                    function expensiveChecksInterceptor(fn) {
+                        if (!fn)
+                            return fn;
+                        expensiveCheckFn.$$watchDelegate = fn.$$watchDelegate;
+                        expensiveCheckFn.assign = expensiveChecksInterceptor(fn.assign);
+                        expensiveCheckFn.constant = fn.constant;
+                        expensiveCheckFn.literal = fn.literal;
+                        for (var i = 0; fn.inputs && i < fn.inputs.length; ++i) {
+                            fn.inputs[i] = expensiveChecksInterceptor(fn.inputs[i]);
+                        }
+                        expensiveCheckFn.inputs = fn.inputs;
+                        return expensiveCheckFn;
+                        function expensiveCheckFn(scope, locals, assign, inputs) {
+                            var expensiveCheckOldValue = runningChecksEnabled;
+                            runningChecksEnabled = true;
+                            try {
+                                return fn(scope, locals, assign, inputs);
+                            } finally {
+                                runningChecksEnabled = expensiveCheckOldValue;
+                            }
+                        }
+                    }
+                    function expressionInputDirtyCheck(newValue, oldValueOfValue) {
+                        if (newValue == null || oldValueOfValue == null) {
+                            return newValue === oldValueOfValue;
+                        }
+                        if (typeof newValue === 'object') {
+                            newValue = getValueOf(newValue);
+                            if (typeof newValue === 'object') {
+                                return false;
+                            }
+                        }
+                        return newValue === oldValueOfValue || newValue !== newValue && oldValueOfValue !== oldValueOfValue;
+                    }
+                    function inputsWatchDelegate(scope, listener, objectEquality, parsedExpression, prettyPrintExpression) {
+                        var inputExpressions = parsedExpression.inputs;
+                        var lastResult;
+                        if (inputExpressions.length === 1) {
+                            var oldInputValueOf = expressionInputDirtyCheck;
+                            inputExpressions = inputExpressions[0];
+                            return scope.$watch(function expressionInputWatch(scope) {
+                                var newInputValue = inputExpressions(scope);
+                                if (!expressionInputDirtyCheck(newInputValue, oldInputValueOf)) {
+                                    lastResult = parsedExpression(scope, undefined, undefined, [newInputValue]);
+                                    oldInputValueOf = newInputValue && getValueOf(newInputValue);
+                                }
+                                return lastResult;
+                            }, listener, objectEquality, prettyPrintExpression);
+                        }
+                        var oldInputValueOfValues = [];
+                        var oldInputValues = [];
+                        for (var i = 0, ii = inputExpressions.length; i < ii; i++) {
+                            oldInputValueOfValues[i] = expressionInputDirtyCheck;
+                            oldInputValues[i] = null;
+                        }
+                        return scope.$watch(function expressionInputsWatch(scope) {
+                            var changed = false;
+                            for (var i = 0, ii = inputExpressions.length; i < ii; i++) {
+                                var newInputValue = inputExpressions[i](scope);
+                                if (changed || (changed = !expressionInputDirtyCheck(newInputValue, oldInputValueOfValues[i]))) {
+                                    oldInputValues[i] = newInputValue;
+                                    oldInputValueOfValues[i] = newInputValue && getValueOf(newInputValue);
+                                }
+                            }
+                            if (changed) {
+                                lastResult = parsedExpression(scope, undefined, undefined, oldInputValues);
+                            }
+                            return lastResult;
+                        }, listener, objectEquality, prettyPrintExpression);
+                    }
+                    function oneTimeWatchDelegate(scope, listener, objectEquality, parsedExpression) {
+                        var unwatch, lastValue;
+                        return unwatch = scope.$watch(function oneTimeWatch(scope) {
+                            return parsedExpression(scope);
+                        }, function oneTimeListener(value, old, scope) {
+                            lastValue = value;
+                            if (isFunction(listener)) {
+                                listener.apply(this, arguments);
+                            }
+                            if (isDefined(value)) {
+                                scope.$$postDigest(function () {
+                                    if (isDefined(lastValue)) {
+                                        unwatch();
+                                    }
+                                });
+                            }
+                        }, objectEquality);
+                    }
+                    function oneTimeLiteralWatchDelegate(scope, listener, objectEquality, parsedExpression) {
+                        var unwatch, lastValue;
+                        return unwatch = scope.$watch(function oneTimeWatch(scope) {
+                            return parsedExpression(scope);
+                        }, function oneTimeListener(value, old, scope) {
+                            lastValue = value;
+                            if (isFunction(listener)) {
+                                listener.call(this, value, old, scope);
+                            }
+                            if (isAllDefined(value)) {
+                                scope.$$postDigest(function () {
+                                    if (isAllDefined(lastValue))
+                                        unwatch();
+                                });
+                            }
+                        }, objectEquality);
+                        function isAllDefined(value) {
+                            var allDefined = true;
+                            forEach(value, function (val) {
+                                if (!isDefined(val))
+                                    allDefined = false;
+                            });
+                            return allDefined;
+                        }
+                    }
+                    function constantWatchDelegate(scope, listener, objectEquality, parsedExpression) {
+                        var unwatch;
+                        return unwatch = scope.$watch(function constantWatch(scope) {
+                            unwatch();
+                            return parsedExpression(scope);
+                        }, listener, objectEquality);
+                    }
+                    function addInterceptor(parsedExpression, interceptorFn) {
+                        if (!interceptorFn)
+                            return parsedExpression;
+                        var watchDelegate = parsedExpression.$$watchDelegate;
+                        var useInputs = false;
+                        var regularWatch = watchDelegate !== oneTimeLiteralWatchDelegate && watchDelegate !== oneTimeWatchDelegate;
+                        var fn = regularWatch ? function regularInterceptedExpression(scope, locals, assign, inputs) {
+                            var value = useInputs && inputs ? inputs[0] : parsedExpression(scope, locals, assign, inputs);
+                            return interceptorFn(value, scope, locals);
+                        } : function oneTimeInterceptedExpression(scope, locals, assign, inputs) {
+                            var value = parsedExpression(scope, locals, assign, inputs);
+                            var result = interceptorFn(value, scope, locals);
+                            return isDefined(value) ? result : value;
+                        };
+                        if (parsedExpression.$$watchDelegate && parsedExpression.$$watchDelegate !== inputsWatchDelegate) {
+                            fn.$$watchDelegate = parsedExpression.$$watchDelegate;
+                        } else if (!interceptorFn.$stateful) {
+                            fn.$$watchDelegate = inputsWatchDelegate;
+                            useInputs = !parsedExpression.inputs;
+                            fn.inputs = parsedExpression.inputs ? parsedExpression.inputs : [parsedExpression];
+                        }
+                        return fn;
+                    }
                 }
             ];
         }
@@ -4837,204 +7495,208 @@ define('angular', [], function () {
                 }
             ];
         }
+        function $$QProvider() {
+            this.$get = [
+                '$browser',
+                '$exceptionHandler',
+                function ($browser, $exceptionHandler) {
+                    return qFactory(function (callback) {
+                        $browser.defer(callback);
+                    }, $exceptionHandler);
+                }
+            ];
+        }
         function qFactory(nextTick, exceptionHandler) {
+            var $qMinErr = minErr('$q', TypeError);
             var defer = function () {
-                var pending = [], value, deferred;
-                deferred = {
-                    resolve: function (val) {
-                        if (pending) {
-                            var callbacks = pending;
-                            pending = undefined;
-                            value = ref(val);
-                            if (callbacks.length) {
-                                nextTick(function () {
-                                    var callback;
-                                    for (var i = 0, ii = callbacks.length; i < ii; i++) {
-                                        callback = callbacks[i];
-                                        value.then(callback[0], callback[1], callback[2]);
-                                    }
-                                });
-                            }
-                        }
-                    },
-                    reject: function (reason) {
-                        deferred.resolve(reject(reason));
-                    },
-                    notify: function (progress) {
-                        if (pending) {
-                            var callbacks = pending;
-                            if (pending.length) {
-                                nextTick(function () {
-                                    var callback;
-                                    for (var i = 0, ii = callbacks.length; i < ii; i++) {
-                                        callback = callbacks[i];
-                                        callback[2](progress);
-                                    }
-                                });
-                            }
-                        }
-                    },
-                    promise: {
-                        then: function (callback, errback, progressback) {
-                            var result = defer();
-                            var wrappedCallback = function (value) {
-                                try {
-                                    result.resolve((isFunction(callback) ? callback : defaultCallback)(value));
-                                } catch (e) {
-                                    result.reject(e);
-                                    exceptionHandler(e);
-                                }
-                            };
-                            var wrappedErrback = function (reason) {
-                                try {
-                                    result.resolve((isFunction(errback) ? errback : defaultErrback)(reason));
-                                } catch (e) {
-                                    result.reject(e);
-                                    exceptionHandler(e);
-                                }
-                            };
-                            var wrappedProgressback = function (progress) {
-                                try {
-                                    result.notify((isFunction(progressback) ? progressback : defaultCallback)(progress));
-                                } catch (e) {
-                                    exceptionHandler(e);
-                                }
-                            };
-                            if (pending) {
-                                pending.push([
-                                    wrappedCallback,
-                                    wrappedErrback,
-                                    wrappedProgressback
-                                ]);
-                            } else {
-                                value.then(wrappedCallback, wrappedErrback, wrappedProgressback);
-                            }
-                            return result.promise;
-                        },
-                        'catch': function (callback) {
-                            return this.then(null, callback);
-                        },
-                        'finally': function (callback) {
-                            function makePromise(value, resolved) {
-                                var result = defer();
-                                if (resolved) {
-                                    result.resolve(value);
-                                } else {
-                                    result.reject(value);
-                                }
-                                return result.promise;
-                            }
-                            function handleCallback(value, isResolved) {
-                                var callbackOutput = null;
-                                try {
-                                    callbackOutput = (callback || defaultCallback)();
-                                } catch (e) {
-                                    return makePromise(e, false);
-                                }
-                                if (callbackOutput && isFunction(callbackOutput.then)) {
-                                    return callbackOutput.then(function () {
-                                        return makePromise(value, isResolved);
-                                    }, function (error) {
-                                        return makePromise(error, false);
-                                    });
-                                } else {
-                                    return makePromise(value, isResolved);
-                                }
-                            }
-                            return this.then(function (value) {
-                                return handleCallback(value, true);
-                            }, function (error) {
-                                return handleCallback(error, false);
-                            });
-                        }
-                    }
-                };
-                return deferred;
+                var d = new Deferred();
+                d.resolve = simpleBind(d, d.resolve);
+                d.reject = simpleBind(d, d.reject);
+                d.notify = simpleBind(d, d.notify);
+                return d;
             };
-            var ref = function (value) {
-                if (value && isFunction(value.then))
-                    return value;
-                return {
-                    then: function (callback) {
-                        var result = defer();
-                        nextTick(function () {
-                            result.resolve(callback(value));
-                        });
-                        return result.promise;
+            function Promise() {
+                this.$$state = { status: 0 };
+            }
+            extend(Promise.prototype, {
+                then: function (onFulfilled, onRejected, progressBack) {
+                    if (isUndefined(onFulfilled) && isUndefined(onRejected) && isUndefined(progressBack)) {
+                        return this;
                     }
+                    var result = new Deferred();
+                    this.$$state.pending = this.$$state.pending || [];
+                    this.$$state.pending.push([
+                        result,
+                        onFulfilled,
+                        onRejected,
+                        progressBack
+                    ]);
+                    if (this.$$state.status > 0)
+                        scheduleProcessQueue(this.$$state);
+                    return result.promise;
+                },
+                'catch': function (callback) {
+                    return this.then(null, callback);
+                },
+                'finally': function (callback, progressBack) {
+                    return this.then(function (value) {
+                        return handleCallback(value, true, callback);
+                    }, function (error) {
+                        return handleCallback(error, false, callback);
+                    }, progressBack);
+                }
+            });
+            function simpleBind(context, fn) {
+                return function (value) {
+                    fn.call(context, value);
                 };
-            };
-            var reject = function (reason) {
-                return {
-                    then: function (callback, errback) {
-                        var result = defer();
-                        nextTick(function () {
-                            try {
-                                result.resolve((isFunction(errback) ? errback : defaultErrback)(reason));
-                            } catch (e) {
-                                result.reject(e);
-                                exceptionHandler(e);
-                            }
-                        });
-                        return result.promise;
-                    }
-                };
-            };
-            var when = function (value, callback, errback, progressback) {
-                var result = defer(), done;
-                var wrappedCallback = function (value) {
+            }
+            function processQueue(state) {
+                var fn, deferred, pending;
+                pending = state.pending;
+                state.processScheduled = false;
+                state.pending = undefined;
+                for (var i = 0, ii = pending.length; i < ii; ++i) {
+                    deferred = pending[i][0];
+                    fn = pending[i][state.status];
                     try {
-                        return (isFunction(callback) ? callback : defaultCallback)(value);
+                        if (isFunction(fn)) {
+                            deferred.resolve(fn(state.value));
+                        } else if (state.status === 1) {
+                            deferred.resolve(state.value);
+                        } else {
+                            deferred.reject(state.value);
+                        }
                     } catch (e) {
-                        exceptionHandler(e);
-                        return reject(e);
-                    }
-                };
-                var wrappedErrback = function (reason) {
-                    try {
-                        return (isFunction(errback) ? errback : defaultErrback)(reason);
-                    } catch (e) {
-                        exceptionHandler(e);
-                        return reject(e);
-                    }
-                };
-                var wrappedProgressback = function (progress) {
-                    try {
-                        return (isFunction(progressback) ? progressback : defaultCallback)(progress);
-                    } catch (e) {
+                        deferred.reject(e);
                         exceptionHandler(e);
                     }
-                };
+                }
+            }
+            function scheduleProcessQueue(state) {
+                if (state.processScheduled || !state.pending)
+                    return;
+                state.processScheduled = true;
                 nextTick(function () {
-                    ref(value).then(function (value) {
-                        if (done)
-                            return;
-                        done = true;
-                        result.resolve(ref(value).then(wrappedCallback, wrappedErrback, wrappedProgressback));
-                    }, function (reason) {
-                        if (done)
-                            return;
-                        done = true;
-                        result.resolve(wrappedErrback(reason));
-                    }, function (progress) {
-                        if (done)
-                            return;
-                        result.notify(wrappedProgressback(progress));
-                    });
+                    processQueue(state);
                 });
+            }
+            function Deferred() {
+                this.promise = new Promise();
+            }
+            extend(Deferred.prototype, {
+                resolve: function (val) {
+                    if (this.promise.$$state.status)
+                        return;
+                    if (val === this.promise) {
+                        this.$$reject($qMinErr('qcycle', 'Expected promise to be resolved with value other than itself \'{0}\'', val));
+                    } else {
+                        this.$$resolve(val);
+                    }
+                },
+                $$resolve: function (val) {
+                    var then;
+                    var that = this;
+                    var done = false;
+                    try {
+                        if (isObject(val) || isFunction(val))
+                            then = val && val.then;
+                        if (isFunction(then)) {
+                            this.promise.$$state.status = -1;
+                            then.call(val, resolvePromise, rejectPromise, simpleBind(this, this.notify));
+                        } else {
+                            this.promise.$$state.value = val;
+                            this.promise.$$state.status = 1;
+                            scheduleProcessQueue(this.promise.$$state);
+                        }
+                    } catch (e) {
+                        rejectPromise(e);
+                        exceptionHandler(e);
+                    }
+                    function resolvePromise(val) {
+                        if (done)
+                            return;
+                        done = true;
+                        that.$$resolve(val);
+                    }
+                    function rejectPromise(val) {
+                        if (done)
+                            return;
+                        done = true;
+                        that.$$reject(val);
+                    }
+                },
+                reject: function (reason) {
+                    if (this.promise.$$state.status)
+                        return;
+                    this.$$reject(reason);
+                },
+                $$reject: function (reason) {
+                    this.promise.$$state.value = reason;
+                    this.promise.$$state.status = 2;
+                    scheduleProcessQueue(this.promise.$$state);
+                },
+                notify: function (progress) {
+                    var callbacks = this.promise.$$state.pending;
+                    if (this.promise.$$state.status <= 0 && callbacks && callbacks.length) {
+                        nextTick(function () {
+                            var callback, result;
+                            for (var i = 0, ii = callbacks.length; i < ii; i++) {
+                                result = callbacks[i][0];
+                                callback = callbacks[i][3];
+                                try {
+                                    result.notify(isFunction(callback) ? callback(progress) : progress);
+                                } catch (e) {
+                                    exceptionHandler(e);
+                                }
+                            }
+                        });
+                    }
+                }
+            });
+            var reject = function (reason) {
+                var result = new Deferred();
+                result.reject(reason);
                 return result.promise;
             };
-            function defaultCallback(value) {
-                return value;
-            }
-            function defaultErrback(reason) {
-                return reject(reason);
-            }
+            var makePromise = function makePromise(value, resolved) {
+                var result = new Deferred();
+                if (resolved) {
+                    result.resolve(value);
+                } else {
+                    result.reject(value);
+                }
+                return result.promise;
+            };
+            var handleCallback = function handleCallback(value, isResolved, callback) {
+                var callbackOutput = null;
+                try {
+                    if (isFunction(callback))
+                        callbackOutput = callback();
+                } catch (e) {
+                    return makePromise(e, false);
+                }
+                if (isPromiseLike(callbackOutput)) {
+                    return callbackOutput.then(function () {
+                        return makePromise(value, isResolved);
+                    }, function (error) {
+                        return makePromise(error, false);
+                    });
+                } else {
+                    return makePromise(value, isResolved);
+                }
+            };
+            var when = function (value, callback, errback, progressBack) {
+                var result = new Deferred();
+                result.resolve(value);
+                return result.promise.then(callback, errback, progressBack);
+            };
+            var resolve = when;
             function all(promises) {
-                var deferred = defer(), counter = 0, results = isArray(promises) ? [] : {};
+                var deferred = new Deferred(), counter = 0, results = isArray(promises) ? [] : {};
                 forEach(promises, function (promise, key) {
                     counter++;
-                    ref(promise).then(function (value) {
+                    when(promise).then(function (value) {
                         if (results.hasOwnProperty(key))
                             return;
                         results[key] = value;
@@ -5051,108 +7713,222 @@ define('angular', [], function () {
                 }
                 return deferred.promise;
             }
-            return {
-                defer: defer,
-                reject: reject,
-                when: when,
-                all: all
+            var $Q = function Q(resolver) {
+                if (!isFunction(resolver)) {
+                    throw $qMinErr('norslvr', 'Expected resolverFn, got \'{0}\'', resolver);
+                }
+                var deferred = new Deferred();
+                function resolveFn(value) {
+                    deferred.resolve(value);
+                }
+                function rejectFn(reason) {
+                    deferred.reject(reason);
+                }
+                resolver(resolveFn, rejectFn);
+                return deferred.promise;
             };
+            $Q.prototype = Promise.prototype;
+            $Q.defer = defer;
+            $Q.reject = reject;
+            $Q.when = when;
+            $Q.resolve = resolve;
+            $Q.all = all;
+            return $Q;
+        }
+        function $$RAFProvider() {
+            this.$get = [
+                '$window',
+                '$timeout',
+                function ($window, $timeout) {
+                    var requestAnimationFrame = $window.requestAnimationFrame || $window.webkitRequestAnimationFrame;
+                    var cancelAnimationFrame = $window.cancelAnimationFrame || $window.webkitCancelAnimationFrame || $window.webkitCancelRequestAnimationFrame;
+                    var rafSupported = !!requestAnimationFrame;
+                    var raf = rafSupported ? function (fn) {
+                        var id = requestAnimationFrame(fn);
+                        return function () {
+                            cancelAnimationFrame(id);
+                        };
+                    } : function (fn) {
+                        var timer = $timeout(fn, 16.66, false);
+                        return function () {
+                            $timeout.cancel(timer);
+                        };
+                    };
+                    raf.supported = rafSupported;
+                    return raf;
+                }
+            ];
         }
         function $RootScopeProvider() {
             var TTL = 10;
             var $rootScopeMinErr = minErr('$rootScope');
+            var lastDirtyWatch = null;
+            var applyAsyncId = null;
             this.digestTtl = function (value) {
                 if (arguments.length) {
                     TTL = value;
                 }
                 return TTL;
             };
+            function createChildScopeClass(parent) {
+                function ChildScope() {
+                    this.$$watchers = this.$$nextSibling = this.$$childHead = this.$$childTail = null;
+                    this.$$listeners = {};
+                    this.$$listenerCount = {};
+                    this.$$watchersCount = 0;
+                    this.$id = nextUid();
+                    this.$$ChildScope = null;
+                }
+                ChildScope.prototype = parent;
+                return ChildScope;
+            }
             this.$get = [
-                '$injector',
                 '$exceptionHandler',
                 '$parse',
                 '$browser',
-                function ($injector, $exceptionHandler, $parse, $browser) {
+                function ($exceptionHandler, $parse, $browser) {
+                    function destroyChildScope($event) {
+                        $event.currentScope.$$destroyed = true;
+                    }
+                    function cleanUpScope($scope) {
+                        if (msie === 9) {
+                            $scope.$$childHead && cleanUpScope($scope.$$childHead);
+                            $scope.$$nextSibling && cleanUpScope($scope.$$nextSibling);
+                        }
+                        $scope.$parent = $scope.$$nextSibling = $scope.$$prevSibling = $scope.$$childHead = $scope.$$childTail = $scope.$root = $scope.$$watchers = null;
+                    }
                     function Scope() {
                         this.$id = nextUid();
                         this.$$phase = this.$parent = this.$$watchers = this.$$nextSibling = this.$$prevSibling = this.$$childHead = this.$$childTail = null;
-                        this['this'] = this.$root = this;
+                        this.$root = this;
                         this.$$destroyed = false;
-                        this.$$asyncQueue = [];
-                        this.$$postDigestQueue = [];
                         this.$$listeners = {};
-                        this.$$isolateBindings = {};
+                        this.$$listenerCount = {};
+                        this.$$watchersCount = 0;
+                        this.$$isolateBindings = null;
                     }
                     Scope.prototype = {
                         constructor: Scope,
-                        $new: function (isolate) {
-                            var Child, child;
+                        $new: function (isolate, parent) {
+                            var child;
+                            parent = parent || this;
                             if (isolate) {
                                 child = new Scope();
                                 child.$root = this.$root;
-                                child.$$asyncQueue = this.$$asyncQueue;
-                                child.$$postDigestQueue = this.$$postDigestQueue;
                             } else {
-                                Child = function () {
-                                };
-                                Child.prototype = this;
-                                child = new Child();
-                                child.$id = nextUid();
+                                if (!this.$$ChildScope) {
+                                    this.$$ChildScope = createChildScopeClass(this);
+                                }
+                                child = new this.$$ChildScope();
                             }
-                            child['this'] = child;
-                            child.$$listeners = {};
-                            child.$parent = this;
-                            child.$$watchers = child.$$nextSibling = child.$$childHead = child.$$childTail = null;
-                            child.$$prevSibling = this.$$childTail;
-                            if (this.$$childHead) {
-                                this.$$childTail.$$nextSibling = child;
-                                this.$$childTail = child;
+                            child.$parent = parent;
+                            child.$$prevSibling = parent.$$childTail;
+                            if (parent.$$childHead) {
+                                parent.$$childTail.$$nextSibling = child;
+                                parent.$$childTail = child;
                             } else {
-                                this.$$childHead = this.$$childTail = child;
+                                parent.$$childHead = parent.$$childTail = child;
                             }
+                            if (isolate || parent != this)
+                                child.$on('$destroy', destroyChildScope);
                             return child;
                         },
-                        $watch: function (watchExp, listener, objectEquality) {
-                            var scope = this, get = compileToFn(watchExp, 'watch'), array = scope.$$watchers, watcher = {
+                        $watch: function (watchExp, listener, objectEquality, prettyPrintExpression) {
+                            var get = $parse(watchExp);
+                            if (get.$$watchDelegate) {
+                                return get.$$watchDelegate(this, listener, objectEquality, get, watchExp);
+                            }
+                            var scope = this, array = scope.$$watchers, watcher = {
                                     fn: listener,
                                     last: initWatchVal,
                                     get: get,
-                                    exp: watchExp,
+                                    exp: prettyPrintExpression || watchExp,
                                     eq: !!objectEquality
                                 };
+                            lastDirtyWatch = null;
                             if (!isFunction(listener)) {
-                                var listenFn = compileToFn(listener || noop, 'listener');
-                                watcher.fn = function (newVal, oldVal, scope) {
-                                    listenFn(scope);
-                                };
-                            }
-                            if (typeof watchExp == 'string' && get.constant) {
-                                var originalFn = watcher.fn;
-                                watcher.fn = function (newVal, oldVal, scope) {
-                                    originalFn.call(this, newVal, oldVal, scope);
-                                    arrayRemove(array, watcher);
-                                };
+                                watcher.fn = noop;
                             }
                             if (!array) {
                                 array = scope.$$watchers = [];
                             }
                             array.unshift(watcher);
-                            return function () {
-                                arrayRemove(array, watcher);
+                            incrementWatchersCount(this, 1);
+                            return function deregisterWatch() {
+                                if (arrayRemove(array, watcher) >= 0) {
+                                    incrementWatchersCount(scope, -1);
+                                }
+                                lastDirtyWatch = null;
+                            };
+                        },
+                        $watchGroup: function (watchExpressions, listener) {
+                            var oldValues = new Array(watchExpressions.length);
+                            var newValues = new Array(watchExpressions.length);
+                            var deregisterFns = [];
+                            var self = this;
+                            var changeReactionScheduled = false;
+                            var firstRun = true;
+                            if (!watchExpressions.length) {
+                                var shouldCall = true;
+                                self.$evalAsync(function () {
+                                    if (shouldCall)
+                                        listener(newValues, newValues, self);
+                                });
+                                return function deregisterWatchGroup() {
+                                    shouldCall = false;
+                                };
+                            }
+                            if (watchExpressions.length === 1) {
+                                return this.$watch(watchExpressions[0], function watchGroupAction(value, oldValue, scope) {
+                                    newValues[0] = value;
+                                    oldValues[0] = oldValue;
+                                    listener(newValues, value === oldValue ? newValues : oldValues, scope);
+                                });
+                            }
+                            forEach(watchExpressions, function (expr, i) {
+                                var unwatchFn = self.$watch(expr, function watchGroupSubAction(value, oldValue) {
+                                    newValues[i] = value;
+                                    oldValues[i] = oldValue;
+                                    if (!changeReactionScheduled) {
+                                        changeReactionScheduled = true;
+                                        self.$evalAsync(watchGroupAction);
+                                    }
+                                });
+                                deregisterFns.push(unwatchFn);
+                            });
+                            function watchGroupAction() {
+                                changeReactionScheduled = false;
+                                if (firstRun) {
+                                    firstRun = false;
+                                    listener(newValues, newValues, self);
+                                } else {
+                                    listener(newValues, oldValues, self);
+                                }
+                            }
+                            return function deregisterWatchGroup() {
+                                while (deregisterFns.length) {
+                                    deregisterFns.shift()();
+                                }
                             };
                         },
                         $watchCollection: function (obj, listener) {
+                            $watchCollectionInterceptor.$stateful = true;
                             var self = this;
-                            var oldValue;
                             var newValue;
+                            var oldValue;
+                            var veryOldValue;
+                            var trackVeryOldValue = listener.length > 1;
                             var changeDetected = 0;
-                            var objGetter = $parse(obj);
+                            var changeDetector = $parse(obj, $watchCollectionInterceptor);
                             var internalArray = [];
                             var internalObject = {};
+                            var initRun = true;
                             var oldLength = 0;
-                            function $watchCollectionWatch() {
-                                newValue = objGetter(self);
-                                var newLength, key;
+                            function $watchCollectionInterceptor(_value) {
+                                newValue = _value;
+                                var newLength, key, bothNaN, newItem, oldItem;
+                                if (isUndefined(newValue))
+                                    return;
                                 if (!isObject(newValue)) {
                                     if (oldValue !== newValue) {
                                         oldValue = newValue;
@@ -5170,9 +7946,12 @@ define('angular', [], function () {
                                         oldValue.length = oldLength = newLength;
                                     }
                                     for (var i = 0; i < newLength; i++) {
-                                        if (oldValue[i] !== newValue[i]) {
+                                        oldItem = oldValue[i];
+                                        newItem = newValue[i];
+                                        bothNaN = oldItem !== oldItem && newItem !== newItem;
+                                        if (!bothNaN && oldItem !== newItem) {
                                             changeDetected++;
-                                            oldValue[i] = newValue[i];
+                                            oldValue[i] = newItem;
                                         }
                                     }
                                 } else {
@@ -5183,16 +7962,19 @@ define('angular', [], function () {
                                     }
                                     newLength = 0;
                                     for (key in newValue) {
-                                        if (newValue.hasOwnProperty(key)) {
+                                        if (hasOwnProperty.call(newValue, key)) {
                                             newLength++;
-                                            if (oldValue.hasOwnProperty(key)) {
-                                                if (oldValue[key] !== newValue[key]) {
+                                            newItem = newValue[key];
+                                            oldItem = oldValue[key];
+                                            if (key in oldValue) {
+                                                bothNaN = oldItem !== oldItem && newItem !== newItem;
+                                                if (!bothNaN && oldItem !== newItem) {
                                                     changeDetected++;
-                                                    oldValue[key] = newValue[key];
+                                                    oldValue[key] = newItem;
                                                 }
                                             } else {
                                                 oldLength++;
-                                                oldValue[key] = newValue[key];
+                                                oldValue[key] = newItem;
                                                 changeDetected++;
                                             }
                                         }
@@ -5200,7 +7982,7 @@ define('angular', [], function () {
                                     if (oldLength > newLength) {
                                         changeDetected++;
                                         for (key in oldValue) {
-                                            if (oldValue.hasOwnProperty(key) && !newValue.hasOwnProperty(key)) {
+                                            if (!hasOwnProperty.call(newValue, key)) {
                                                 oldLength--;
                                                 delete oldValue[key];
                                             }
@@ -5210,57 +7992,97 @@ define('angular', [], function () {
                                 return changeDetected;
                             }
                             function $watchCollectionAction() {
-                                listener(newValue, oldValue, self);
+                                if (initRun) {
+                                    initRun = false;
+                                    listener(newValue, newValue, self);
+                                } else {
+                                    listener(newValue, veryOldValue, self);
+                                }
+                                if (trackVeryOldValue) {
+                                    if (!isObject(newValue)) {
+                                        veryOldValue = newValue;
+                                    } else if (isArrayLike(newValue)) {
+                                        veryOldValue = new Array(newValue.length);
+                                        for (var i = 0; i < newValue.length; i++) {
+                                            veryOldValue[i] = newValue[i];
+                                        }
+                                    } else {
+                                        veryOldValue = {};
+                                        for (var key in newValue) {
+                                            if (hasOwnProperty.call(newValue, key)) {
+                                                veryOldValue[key] = newValue[key];
+                                            }
+                                        }
+                                    }
+                                }
                             }
-                            return this.$watch($watchCollectionWatch, $watchCollectionAction);
+                            return this.$watch(changeDetector, $watchCollectionAction);
                         },
                         $digest: function () {
-                            var watch, value, last, watchers, asyncQueue = this.$$asyncQueue, postDigestQueue = this.$$postDigestQueue, length, dirty, ttl = TTL, next, current, target = this, watchLog = [], logIdx, logMsg, asyncTask;
+                            var watch, value, last, fn, get, watchers, length, dirty, ttl = TTL, next, current, target = this, watchLog = [], logIdx, asyncTask;
                             beginPhase('$digest');
+                            $browser.$$checkUrlChange();
+                            if (this === $rootScope && applyAsyncId !== null) {
+                                $browser.defer.cancel(applyAsyncId);
+                                flushApplyAsync();
+                            }
+                            lastDirtyWatch = null;
                             do {
                                 dirty = false;
                                 current = target;
                                 while (asyncQueue.length) {
                                     try {
                                         asyncTask = asyncQueue.shift();
-                                        asyncTask.scope.$eval(asyncTask.expression);
+                                        asyncTask.scope.$eval(asyncTask.expression, asyncTask.locals);
                                     } catch (e) {
                                         $exceptionHandler(e);
                                     }
+                                    lastDirtyWatch = null;
                                 }
-                                do {
-                                    if (watchers = current.$$watchers) {
-                                        length = watchers.length;
-                                        while (length--) {
-                                            try {
-                                                watch = watchers[length];
-                                                if (watch && (value = watch.get(current)) !== (last = watch.last) && !(watch.eq ? equals(value, last) : typeof value == 'number' && typeof last == 'number' && isNaN(value) && isNaN(last))) {
-                                                    dirty = true;
-                                                    watch.last = watch.eq ? copy(value) : value;
-                                                    watch.fn(value, last === initWatchVal ? value : last, current);
-                                                    if (ttl < 5) {
-                                                        logIdx = 4 - ttl;
-                                                        if (!watchLog[logIdx])
-                                                            watchLog[logIdx] = [];
-                                                        logMsg = isFunction(watch.exp) ? 'fn: ' + (watch.exp.name || watch.exp.toString()) : watch.exp;
-                                                        logMsg += '; newVal: ' + toJson(value) + '; oldVal: ' + toJson(last);
-                                                        watchLog[logIdx].push(logMsg);
+                                traverseScopesLoop:
+                                    do {
+                                        if (watchers = current.$$watchers) {
+                                            length = watchers.length;
+                                            while (length--) {
+                                                try {
+                                                    watch = watchers[length];
+                                                    if (watch) {
+                                                        get = watch.get;
+                                                        if ((value = get(current)) !== (last = watch.last) && !(watch.eq ? equals(value, last) : typeof value === 'number' && typeof last === 'number' && isNaN(value) && isNaN(last))) {
+                                                            dirty = true;
+                                                            lastDirtyWatch = watch;
+                                                            watch.last = watch.eq ? copy(value, null) : value;
+                                                            fn = watch.fn;
+                                                            fn(value, last === initWatchVal ? value : last, current);
+                                                            if (ttl < 5) {
+                                                                logIdx = 4 - ttl;
+                                                                if (!watchLog[logIdx])
+                                                                    watchLog[logIdx] = [];
+                                                                watchLog[logIdx].push({
+                                                                    msg: isFunction(watch.exp) ? 'fn: ' + (watch.exp.name || watch.exp.toString()) : watch.exp,
+                                                                    newVal: value,
+                                                                    oldVal: last
+                                                                });
+                                                            }
+                                                        } else if (watch === lastDirtyWatch) {
+                                                            dirty = false;
+                                                            break traverseScopesLoop;
+                                                        }
                                                     }
+                                                } catch (e) {
+                                                    $exceptionHandler(e);
                                                 }
-                                            } catch (e) {
-                                                $exceptionHandler(e);
                                             }
                                         }
-                                    }
-                                    if (!(next = current.$$childHead || current !== target && current.$$nextSibling)) {
-                                        while (current !== target && !(next = current.$$nextSibling)) {
-                                            current = current.$parent;
+                                        if (!(next = current.$$watchersCount && current.$$childHead || current !== target && current.$$nextSibling)) {
+                                            while (current !== target && !(next = current.$$nextSibling)) {
+                                                current = current.$parent;
+                                            }
                                         }
-                                    }
-                                } while (current = next);
-                                if (dirty && !ttl--) {
+                                    } while (current = next);
+                                if ((dirty || asyncQueue.length) && !ttl--) {
                                     clearPhase();
-                                    throw $rootScopeMinErr('infdig', '{0} $digest() iterations reached. Aborting!\n' + 'Watchers fired in the last 5 iterations: {1}', TTL, toJson(watchLog));
+                                    throw $rootScopeMinErr('infdig', '{0} $digest() iterations reached. Aborting!\n' + 'Watchers fired in the last 5 iterations: {1}', TTL, watchLog);
                                 }
                             } while (dirty || asyncQueue.length);
                             clearPhase();
@@ -5273,48 +8095,65 @@ define('angular', [], function () {
                             }
                         },
                         $destroy: function () {
-                            if ($rootScope == this || this.$$destroyed)
+                            if (this.$$destroyed)
                                 return;
                             var parent = this.$parent;
                             this.$broadcast('$destroy');
                             this.$$destroyed = true;
-                            if (parent.$$childHead == this)
+                            if (this === $rootScope) {
+                                $browser.$$applicationDestroyed();
+                            }
+                            incrementWatchersCount(this, -this.$$watchersCount);
+                            for (var eventName in this.$$listenerCount) {
+                                decrementListenerCount(this, this.$$listenerCount[eventName], eventName);
+                            }
+                            if (parent && parent.$$childHead == this)
                                 parent.$$childHead = this.$$nextSibling;
-                            if (parent.$$childTail == this)
+                            if (parent && parent.$$childTail == this)
                                 parent.$$childTail = this.$$prevSibling;
                             if (this.$$prevSibling)
                                 this.$$prevSibling.$$nextSibling = this.$$nextSibling;
                             if (this.$$nextSibling)
                                 this.$$nextSibling.$$prevSibling = this.$$prevSibling;
-                            this.$parent = this.$$nextSibling = this.$$prevSibling = this.$$childHead = this.$$childTail = null;
+                            this.$destroy = this.$digest = this.$apply = this.$evalAsync = this.$applyAsync = noop;
+                            this.$on = this.$watch = this.$watchGroup = function () {
+                                return noop;
+                            };
+                            this.$$listeners = {};
+                            this.$$nextSibling = null;
+                            cleanUpScope(this);
                         },
                         $eval: function (expr, locals) {
                             return $parse(expr)(this, locals);
                         },
-                        $evalAsync: function (expr) {
-                            if (!$rootScope.$$phase && !$rootScope.$$asyncQueue.length) {
+                        $evalAsync: function (expr, locals) {
+                            if (!$rootScope.$$phase && !asyncQueue.length) {
                                 $browser.defer(function () {
-                                    if ($rootScope.$$asyncQueue.length) {
+                                    if (asyncQueue.length) {
                                         $rootScope.$digest();
                                     }
                                 });
                             }
-                            this.$$asyncQueue.push({
+                            asyncQueue.push({
                                 scope: this,
-                                expression: expr
+                                expression: $parse(expr),
+                                locals: locals
                             });
                         },
                         $$postDigest: function (fn) {
-                            this.$$postDigestQueue.push(fn);
+                            postDigestQueue.push(fn);
                         },
                         $apply: function (expr) {
                             try {
                                 beginPhase('$apply');
-                                return this.$eval(expr);
+                                try {
+                                    return this.$eval(expr);
+                                } finally {
+                                    clearPhase();
+                                }
                             } catch (e) {
                                 $exceptionHandler(e);
                             } finally {
-                                clearPhase();
                                 try {
                                     $rootScope.$digest();
                                 } catch (e) {
@@ -5323,14 +8162,35 @@ define('angular', [], function () {
                                 }
                             }
                         },
+                        $applyAsync: function (expr) {
+                            var scope = this;
+                            expr && applyAsyncQueue.push($applyAsyncExpression);
+                            expr = $parse(expr);
+                            scheduleApplyAsync();
+                            function $applyAsyncExpression() {
+                                scope.$eval(expr);
+                            }
+                        },
                         $on: function (name, listener) {
                             var namedListeners = this.$$listeners[name];
                             if (!namedListeners) {
                                 this.$$listeners[name] = namedListeners = [];
                             }
                             namedListeners.push(listener);
+                            var current = this;
+                            do {
+                                if (!current.$$listenerCount[name]) {
+                                    current.$$listenerCount[name] = 0;
+                                }
+                                current.$$listenerCount[name]++;
+                            } while (current = current.$parent);
+                            var self = this;
                             return function () {
-                                namedListeners[indexOf(namedListeners, listener)] = null;
+                                var indexOfListener = namedListeners.indexOf(listener);
+                                if (indexOfListener !== -1) {
+                                    namedListeners[indexOfListener] = null;
+                                    decrementListenerCount(self, 1, name);
+                                }
                             };
                         },
                         $emit: function (name, args) {
@@ -5361,10 +8221,13 @@ define('angular', [], function () {
                                         $exceptionHandler(e);
                                     }
                                 }
-                                if (stopPropagation)
+                                if (stopPropagation) {
+                                    event.currentScope = null;
                                     return event;
+                                }
                                 scope = scope.$parent;
                             } while (scope);
+                            event.currentScope = null;
                             return event;
                         },
                         $broadcast: function (name, args) {
@@ -5375,9 +8238,11 @@ define('angular', [], function () {
                                         event.defaultPrevented = true;
                                     },
                                     defaultPrevented: false
-                                }, listenerArgs = concat([event], arguments, 1), listeners, i, length;
-                            do {
-                                current = next;
+                                };
+                            if (!target.$$listenerCount[name])
+                                return event;
+                            var listenerArgs = concat([event], arguments, 1), listeners, i, length;
+                            while (current = next) {
                                 event.currentScope = current;
                                 listeners = current.$$listeners[name] || [];
                                 for (i = 0, length = listeners.length; i < length; i++) {
@@ -5393,16 +8258,20 @@ define('angular', [], function () {
                                         $exceptionHandler(e);
                                     }
                                 }
-                                if (!(next = current.$$childHead || current !== target && current.$$nextSibling)) {
+                                if (!(next = current.$$listenerCount[name] && current.$$childHead || current !== target && current.$$nextSibling)) {
                                     while (current !== target && !(next = current.$$nextSibling)) {
                                         current = current.$parent;
                                     }
                                 }
-                            } while (current = next);
+                            }
+                            event.currentScope = null;
                             return event;
                         }
                     };
                     var $rootScope = new Scope();
+                    var asyncQueue = $rootScope.$$asyncQueue = [];
+                    var postDigestQueue = $rootScope.$$postDigestQueue = [];
+                    var applyAsyncQueue = $rootScope.$$applyAsyncQueue = [];
                     return $rootScope;
                     function beginPhase(phase) {
                         if ($rootScope.$$phase) {
@@ -5413,18 +8282,43 @@ define('angular', [], function () {
                     function clearPhase() {
                         $rootScope.$$phase = null;
                     }
-                    function compileToFn(exp, name) {
-                        var fn = $parse(exp);
-                        assertArgFn(fn, name);
-                        return fn;
+                    function incrementWatchersCount(current, count) {
+                        do {
+                            current.$$watchersCount += count;
+                        } while (current = current.$parent);
+                    }
+                    function decrementListenerCount(current, count, name) {
+                        do {
+                            current.$$listenerCount[name] -= count;
+                            if (current.$$listenerCount[name] === 0) {
+                                delete current.$$listenerCount[name];
+                            }
+                        } while (current = current.$parent);
                     }
                     function initWatchVal() {
+                    }
+                    function flushApplyAsync() {
+                        while (applyAsyncQueue.length) {
+                            try {
+                                applyAsyncQueue.shift()();
+                            } catch (e) {
+                                $exceptionHandler(e);
+                            }
+                        }
+                        applyAsyncId = null;
+                    }
+                    function scheduleApplyAsync() {
+                        if (applyAsyncId === null) {
+                            applyAsyncId = $browser.defer(function () {
+                                $rootScope.$apply(flushApplyAsync);
+                            });
+                        }
                     }
                 }
             ];
         }
         function $$SanitizeUriProvider() {
-            var aHrefSanitizationWhitelist = /^\s*(https?|ftp|mailto|tel|file):/, imgSrcSanitizationWhitelist = /^\s*(https?|ftp|file):|data:image\//;
+            var aHrefSanitizationWhitelist = /^\s*(https?|ftp|mailto|tel|file):/, imgSrcSanitizationWhitelist = /^\s*((https?|ftp|file|blob):|data:image\/)/;
             this.aHrefSanitizationWhitelist = function (regexp) {
                 if (isDefined(regexp)) {
                     aHrefSanitizationWhitelist = regexp;
@@ -5443,11 +8337,9 @@ define('angular', [], function () {
                 return function sanitizeUri(uri, isImage) {
                     var regex = isImage ? imgSrcSanitizationWhitelist : aHrefSanitizationWhitelist;
                     var normalizedVal;
-                    if (!msie || msie >= 8) {
-                        normalizedVal = urlResolve(uri).href;
-                        if (normalizedVal !== '' && !normalizedVal.match(regex)) {
-                            return 'unsafe:' + normalizedVal;
-                        }
+                    normalizedVal = urlResolve(uri).href;
+                    if (normalizedVal !== '' && !normalizedVal.match(regex)) {
+                        return 'unsafe:' + normalizedVal;
                     }
                     return uri;
                 };
@@ -5461,9 +8353,6 @@ define('angular', [], function () {
             RESOURCE_URL: 'resourceUrl',
             JS: 'js'
         };
-        function escapeForRegexp(s) {
-            return s.replace(/([-()\[\]{}+?*.$\^|,:#<!\\])/g, '\\$1').replace(/\x08/g, '\\x08');
-        }
         function adjustMatcher(matcher) {
             if (matcher === 'self') {
                 return matcher;
@@ -5566,7 +8455,7 @@ define('angular', [], function () {
                         if (!Constructor) {
                             throw $sceMinErr('icontext', 'Attempted to trust a value in invalid context. Context: {0}; Value: {1}', type, trustedValue);
                         }
-                        if (trustedValue === null || trustedValue === undefined || trustedValue === '') {
+                        if (trustedValue === null || isUndefined(trustedValue) || trustedValue === '') {
                             return trustedValue;
                         }
                         if (typeof trustedValue !== 'string') {
@@ -5582,7 +8471,7 @@ define('angular', [], function () {
                         }
                     }
                     function getTrusted(type, maybeTrusted) {
-                        if (maybeTrusted === null || maybeTrusted === undefined || maybeTrusted === '') {
+                        if (maybeTrusted === null || isUndefined(maybeTrusted) || maybeTrusted === '') {
                             return maybeTrusted;
                         }
                         var constructor = byType.hasOwnProperty(type) ? byType[type] : null;
@@ -5618,13 +8507,12 @@ define('angular', [], function () {
             };
             this.$get = [
                 '$parse',
-                '$sniffer',
                 '$sceDelegate',
-                function ($parse, $sniffer, $sceDelegate) {
-                    if (enabled && $sniffer.msie && $sniffer.msieDocumentMode < 8) {
-                        throw $sceMinErr('iequirks', 'Strict Contextual Escaping does not support Internet Explorer version < 9 in quirks ' + 'mode.  You can fix this by adding the text <!doctype html> to the top of your HTML ' + 'document.  See http://docs.angularjs.org/api/ng.$sce for more information.');
+                function ($parse, $sceDelegate) {
+                    if (enabled && msie < 8) {
+                        throw $sceMinErr('iequirks', 'Strict Contextual Escaping does not support Internet Explorer version < 11 in quirks ' + 'mode.  You can fix this by adding the text <!doctype html> to the top of your HTML ' + 'document.  See http://docs.angularjs.org/api/ng.$sce for more information.');
                     }
-                    var sce = copy(SCE_CONTEXTS);
+                    var sce = shallowCopy(SCE_CONTEXTS);
                     sce.isEnabled = function () {
                         return enabled;
                     };
@@ -5642,9 +8530,9 @@ define('angular', [], function () {
                         if (parsed.literal && parsed.constant) {
                             return parsed;
                         } else {
-                            return function sceParseAsTrusted(self, locals) {
-                                return sce.getTrusted(type, parsed(self, locals));
-                            };
+                            return $parse(expr, function (value) {
+                                return sce.getTrusted(type, value);
+                            });
                         }
                     };
                     var parse = sce.parseAs, getTrusted = sce.getTrusted, trustAs = sce.trustAs;
@@ -5669,7 +8557,7 @@ define('angular', [], function () {
                 '$window',
                 '$document',
                 function ($window, $document) {
-                    var eventSupport = {}, android = int((/android (\d+)/.exec(lowercase(($window.navigator || {}).userAgent)) || [])[1]), boxee = /Boxee/i.test(($window.navigator || {}).userAgent), document = $document[0] || {}, documentMode = document.documentMode, vendorPrefix, vendorRegex = /^(Moz|webkit|O|ms)(?=[A-Z])/, bodyStyle = document.body && document.body.style, transitions = false, animations = false, match;
+                    var eventSupport = {}, isChromePackagedApp = $window.chrome && $window.chrome.app && $window.chrome.app.runtime, hasHistoryPushState = !isChromePackagedApp && $window.history && $window.history.pushState, android = toInt((/android (\d+)/.exec(lowercase(($window.navigator || {}).userAgent)) || [])[1]), boxee = /Boxee/i.test(($window.navigator || {}).userAgent), document = $document[0] || {}, vendorPrefix, vendorRegex = /^(Moz|webkit|ms)(?=[A-Z])/, bodyStyle = document.body && document.body.style, transitions = false, animations = false, match;
                     if (bodyStyle) {
                         for (var prop in bodyStyle) {
                             if (match = vendorRegex.exec(prop)) {
@@ -5684,15 +8572,14 @@ define('angular', [], function () {
                         transitions = !!('transition' in bodyStyle || vendorPrefix + 'Transition' in bodyStyle);
                         animations = !!('animation' in bodyStyle || vendorPrefix + 'Animation' in bodyStyle);
                         if (android && (!transitions || !animations)) {
-                            transitions = isString(document.body.style.webkitTransition);
-                            animations = isString(document.body.style.webkitAnimation);
+                            transitions = isString(bodyStyle.webkitTransition);
+                            animations = isString(bodyStyle.webkitAnimation);
                         }
                     }
                     return {
-                        history: !!($window.history && $window.history.pushState && !(android < 4) && !boxee),
-                        hashchange: 'onhashchange' in $window && (!documentMode || documentMode > 7),
+                        history: !!(hasHistoryPushState && !(android < 4) && !boxee),
                         hasEvent: function (event) {
-                            if (event == 'input' && msie == 9)
+                            if (event === 'input' && msie <= 11)
                                 return false;
                             if (isUndefined(eventSupport[event])) {
                                 var divElm = document.createElement('div');
@@ -5704,9 +8591,118 @@ define('angular', [], function () {
                         vendorPrefix: vendorPrefix,
                         transitions: transitions,
                         animations: animations,
-                        msie: msie,
-                        msieDocumentMode: documentMode
+                        android: android
                     };
+                }
+            ];
+        }
+        var $templateRequestMinErr = minErr('$compile');
+        function $TemplateRequestProvider() {
+            var httpOptions;
+            this.httpOptions = function (val) {
+                if (val) {
+                    httpOptions = val;
+                    return this;
+                }
+                return httpOptions;
+            };
+            this.$get = [
+                '$templateCache',
+                '$http',
+                '$q',
+                '$sce',
+                function ($templateCache, $http, $q, $sce) {
+                    function handleRequestFn(tpl, ignoreRequestError) {
+                        handleRequestFn.totalPendingRequests++;
+                        if (!isString(tpl) || !$templateCache.get(tpl)) {
+                            tpl = $sce.getTrustedResourceUrl(tpl);
+                        }
+                        var transformResponse = $http.defaults && $http.defaults.transformResponse;
+                        if (isArray(transformResponse)) {
+                            transformResponse = transformResponse.filter(function (transformer) {
+                                return transformer !== defaultHttpResponseTransform;
+                            });
+                        } else if (transformResponse === defaultHttpResponseTransform) {
+                            transformResponse = null;
+                        }
+                        return $http.get(tpl, extend({
+                            cache: $templateCache,
+                            transformResponse: transformResponse
+                        }, httpOptions))['finally'](function () {
+                            handleRequestFn.totalPendingRequests--;
+                        }).then(function (response) {
+                            $templateCache.put(tpl, response.data);
+                            return response.data;
+                        }, handleError);
+                        function handleError(resp) {
+                            if (!ignoreRequestError) {
+                                throw $templateRequestMinErr('tpload', 'Failed to load template: {0} (HTTP status: {1} {2})', tpl, resp.status, resp.statusText);
+                            }
+                            return $q.reject(resp);
+                        }
+                    }
+                    handleRequestFn.totalPendingRequests = 0;
+                    return handleRequestFn;
+                }
+            ];
+        }
+        function $$TestabilityProvider() {
+            this.$get = [
+                '$rootScope',
+                '$browser',
+                '$location',
+                function ($rootScope, $browser, $location) {
+                    var testability = {};
+                    testability.findBindings = function (element, expression, opt_exactMatch) {
+                        var bindings = element.getElementsByClassName('ng-binding');
+                        var matches = [];
+                        forEach(bindings, function (binding) {
+                            var dataBinding = angular.element(binding).data('$binding');
+                            if (dataBinding) {
+                                forEach(dataBinding, function (bindingName) {
+                                    if (opt_exactMatch) {
+                                        var matcher = new RegExp('(^|\\s)' + escapeForRegexp(expression) + '(\\s|\\||$)');
+                                        if (matcher.test(bindingName)) {
+                                            matches.push(binding);
+                                        }
+                                    } else {
+                                        if (bindingName.indexOf(expression) != -1) {
+                                            matches.push(binding);
+                                        }
+                                    }
+                                });
+                            }
+                        });
+                        return matches;
+                    };
+                    testability.findModels = function (element, expression, opt_exactMatch) {
+                        var prefixes = [
+                            'ng-',
+                            'data-ng-',
+                            'ng\\:'
+                        ];
+                        for (var p = 0; p < prefixes.length; ++p) {
+                            var attributeEquals = opt_exactMatch ? '=' : '*=';
+                            var selector = '[' + prefixes[p] + 'model' + attributeEquals + '"' + expression + '"]';
+                            var elements = element.querySelectorAll(selector);
+                            if (elements.length) {
+                                return elements;
+                            }
+                        }
+                    };
+                    testability.getLocation = function () {
+                        return $location.url();
+                    };
+                    testability.setLocation = function (url) {
+                        if (url !== $location.url()) {
+                            $location.url(url);
+                            $rootScope.$digest();
+                        }
+                    };
+                    testability.whenStable = function (callback) {
+                        $browser.notifyWhenNoOutstandingRequests(callback);
+                    };
+                    return testability;
                 }
             ];
         }
@@ -5715,14 +8711,20 @@ define('angular', [], function () {
                 '$rootScope',
                 '$browser',
                 '$q',
+                '$$q',
                 '$exceptionHandler',
-                function ($rootScope, $browser, $q, $exceptionHandler) {
+                function ($rootScope, $browser, $q, $$q, $exceptionHandler) {
                     var deferreds = {};
                     function timeout(fn, delay, invokeApply) {
-                        var deferred = $q.defer(), promise = deferred.promise, skipApply = isDefined(invokeApply) && !invokeApply, timeoutId;
+                        if (!isFunction(fn)) {
+                            invokeApply = delay;
+                            delay = fn;
+                            fn = noop;
+                        }
+                        var args = sliceArgs(arguments, 3), skipApply = isDefined(invokeApply) && !invokeApply, deferred = (skipApply ? $$q : $q).defer(), promise = deferred.promise, timeoutId;
                         timeoutId = $browser.defer(function () {
                             try {
-                                deferred.resolve(fn());
+                                deferred.resolve(fn.apply(null, args));
                             } catch (e) {
                                 deferred.reject(e);
                                 $exceptionHandler(e);
@@ -5748,9 +8750,9 @@ define('angular', [], function () {
                 }
             ];
         }
-        var urlParsingNode = document.createElement('a');
-        var originUrl = urlResolve(window.location.href, true);
-        function urlResolve(url, base) {
+        var urlParsingNode = window.document.createElement('a');
+        var originUrl = urlResolve(window.location.href);
+        function urlResolve(url) {
             var href = url;
             if (msie) {
                 urlParsingNode.setAttribute('href', href);
@@ -5774,6 +8776,42 @@ define('angular', [], function () {
         }
         function $WindowProvider() {
             this.$get = valueFn(window);
+        }
+        function $$CookieReader($document) {
+            var rawDocument = $document[0] || {};
+            var lastCookies = {};
+            var lastCookieString = '';
+            function safeDecodeURIComponent(str) {
+                try {
+                    return decodeURIComponent(str);
+                } catch (e) {
+                    return str;
+                }
+            }
+            return function () {
+                var cookieArray, cookie, i, index, name;
+                var currentCookieString = rawDocument.cookie || '';
+                if (currentCookieString !== lastCookieString) {
+                    lastCookieString = currentCookieString;
+                    cookieArray = lastCookieString.split('; ');
+                    lastCookies = {};
+                    for (i = 0; i < cookieArray.length; i++) {
+                        cookie = cookieArray[i];
+                        index = cookie.indexOf('=');
+                        if (index > 0) {
+                            name = safeDecodeURIComponent(cookie.substring(0, index));
+                            if (isUndefined(lastCookies[name])) {
+                                lastCookies[name] = safeDecodeURIComponent(cookie.substring(index + 1));
+                            }
+                        }
+                    }
+                }
+                return lastCookies;
+            };
+        }
+        $$CookieReader.$inject = ['$document'];
+        function $$CookieReaderProvider() {
+            this.$get = $$CookieReader;
         }
         $FilterProvider.$inject = ['$provide'];
         function $FilterProvider($provide) {
@@ -5810,229 +8848,343 @@ define('angular', [], function () {
         }
         function filterFilter() {
             return function (array, expression, comparator) {
-                if (!isArray(array))
-                    return array;
-                var comparatorType = typeof comparator, predicates = [];
-                predicates.check = function (value) {
-                    for (var j = 0; j < predicates.length; j++) {
-                        if (!predicates[j](value)) {
-                            return false;
-                        }
-                    }
-                    return true;
-                };
-                if (comparatorType !== 'function') {
-                    if (comparatorType === 'boolean' && comparator) {
-                        comparator = function (obj, text) {
-                            return angular.equals(obj, text);
-                        };
+                if (!isArrayLike(array)) {
+                    if (array == null) {
+                        return array;
                     } else {
-                        comparator = function (obj, text) {
-                            text = ('' + text).toLowerCase();
-                            return ('' + obj).toLowerCase().indexOf(text) > -1;
-                        };
+                        throw minErr('filter')('notarray', 'Expected array but received: {0}', array);
                     }
                 }
-                var search = function (obj, text) {
-                    if (typeof text == 'string' && text.charAt(0) === '!') {
-                        return !search(obj, text.substr(1));
-                    }
-                    switch (typeof obj) {
-                    case 'boolean':
-                    case 'number':
-                    case 'string':
-                        return comparator(obj, text);
-                    case 'object':
-                        switch (typeof text) {
-                        case 'object':
-                            return comparator(obj, text);
-                        default:
-                            for (var objKey in obj) {
-                                if (objKey.charAt(0) !== '$' && search(obj[objKey], text)) {
-                                    return true;
-                                }
-                            }
-                            break;
-                        }
-                        return false;
-                    case 'array':
-                        for (var i = 0; i < obj.length; i++) {
-                            if (search(obj[i], text)) {
-                                return true;
-                            }
-                        }
-                        return false;
-                    default:
-                        return false;
-                    }
-                };
-                switch (typeof expression) {
+                var expressionType = getTypeForFilter(expression);
+                var predicateFn;
+                var matchAgainstAnyProp;
+                switch (expressionType) {
+                case 'function':
+                    predicateFn = expression;
+                    break;
                 case 'boolean':
+                case 'null':
                 case 'number':
                 case 'string':
-                    expression = { $: expression };
+                    matchAgainstAnyProp = true;
                 case 'object':
-                    for (var key in expression) {
-                        if (key == '$') {
-                            (function () {
-                                if (!expression[key])
-                                    return;
-                                var path = key;
-                                predicates.push(function (value) {
-                                    return search(value, expression[path]);
-                                });
-                            }());
-                        } else {
-                            (function () {
-                                if (typeof expression[key] == 'undefined') {
-                                    return;
-                                }
-                                var path = key;
-                                predicates.push(function (value) {
-                                    return search(getter(value, path), expression[path]);
-                                });
-                            }());
-                        }
-                    }
-                    break;
-                case 'function':
-                    predicates.push(expression);
+                    predicateFn = createPredicateFn(expression, comparator, matchAgainstAnyProp);
                     break;
                 default:
                     return array;
                 }
-                var filtered = [];
-                for (var j = 0; j < array.length; j++) {
-                    var value = array[j];
-                    if (predicates.check(value)) {
-                        filtered.push(value);
-                    }
-                }
-                return filtered;
+                return Array.prototype.filter.call(array, predicateFn);
             };
         }
+        function createPredicateFn(expression, comparator, matchAgainstAnyProp) {
+            var shouldMatchPrimitives = isObject(expression) && '$' in expression;
+            var predicateFn;
+            if (comparator === true) {
+                comparator = equals;
+            } else if (!isFunction(comparator)) {
+                comparator = function (actual, expected) {
+                    if (isUndefined(actual)) {
+                        return false;
+                    }
+                    if (actual === null || expected === null) {
+                        return actual === expected;
+                    }
+                    if (isObject(expected) || isObject(actual) && !hasCustomToString(actual)) {
+                        return false;
+                    }
+                    actual = lowercase('' + actual);
+                    expected = lowercase('' + expected);
+                    return actual.indexOf(expected) !== -1;
+                };
+            }
+            predicateFn = function (item) {
+                if (shouldMatchPrimitives && !isObject(item)) {
+                    return deepCompare(item, expression.$, comparator, false);
+                }
+                return deepCompare(item, expression, comparator, matchAgainstAnyProp);
+            };
+            return predicateFn;
+        }
+        function deepCompare(actual, expected, comparator, matchAgainstAnyProp, dontMatchWholeObject) {
+            var actualType = getTypeForFilter(actual);
+            var expectedType = getTypeForFilter(expected);
+            if (expectedType === 'string' && expected.charAt(0) === '!') {
+                return !deepCompare(actual, expected.substring(1), comparator, matchAgainstAnyProp);
+            } else if (isArray(actual)) {
+                return actual.some(function (item) {
+                    return deepCompare(item, expected, comparator, matchAgainstAnyProp);
+                });
+            }
+            switch (actualType) {
+            case 'object':
+                var key;
+                if (matchAgainstAnyProp) {
+                    for (key in actual) {
+                        if (key.charAt(0) !== '$' && deepCompare(actual[key], expected, comparator, true)) {
+                            return true;
+                        }
+                    }
+                    return dontMatchWholeObject ? false : deepCompare(actual, expected, comparator, false);
+                } else if (expectedType === 'object') {
+                    for (key in expected) {
+                        var expectedVal = expected[key];
+                        if (isFunction(expectedVal) || isUndefined(expectedVal)) {
+                            continue;
+                        }
+                        var matchAnyProperty = key === '$';
+                        var actualVal = matchAnyProperty ? actual : actual[key];
+                        if (!deepCompare(actualVal, expectedVal, comparator, matchAnyProperty, matchAnyProperty)) {
+                            return false;
+                        }
+                    }
+                    return true;
+                } else {
+                    return comparator(actual, expected);
+                }
+                break;
+            case 'function':
+                return false;
+            default:
+                return comparator(actual, expected);
+            }
+        }
+        function getTypeForFilter(val) {
+            return val === null ? 'null' : typeof val;
+        }
+        var MAX_DIGITS = 22;
+        var DECIMAL_SEP = '.';
+        var ZERO_CHAR = '0';
         currencyFilter.$inject = ['$locale'];
         function currencyFilter($locale) {
             var formats = $locale.NUMBER_FORMATS;
-            return function (amount, currencySymbol) {
-                if (isUndefined(currencySymbol))
+            return function (amount, currencySymbol, fractionSize) {
+                if (isUndefined(currencySymbol)) {
                     currencySymbol = formats.CURRENCY_SYM;
-                return formatNumber(amount, formats.PATTERNS[1], formats.GROUP_SEP, formats.DECIMAL_SEP, 2).replace(/\u00A4/g, currencySymbol);
+                }
+                if (isUndefined(fractionSize)) {
+                    fractionSize = formats.PATTERNS[1].maxFrac;
+                }
+                return amount == null ? amount : formatNumber(amount, formats.PATTERNS[1], formats.GROUP_SEP, formats.DECIMAL_SEP, fractionSize).replace(/\u00A4/g, currencySymbol);
             };
         }
         numberFilter.$inject = ['$locale'];
         function numberFilter($locale) {
             var formats = $locale.NUMBER_FORMATS;
             return function (number, fractionSize) {
-                return formatNumber(number, formats.PATTERNS[0], formats.GROUP_SEP, formats.DECIMAL_SEP, fractionSize);
+                return number == null ? number : formatNumber(number, formats.PATTERNS[0], formats.GROUP_SEP, formats.DECIMAL_SEP, fractionSize);
             };
         }
-        var DECIMAL_SEP = '.';
-        function formatNumber(number, pattern, groupSep, decimalSep, fractionSize) {
-            if (isNaN(number) || !isFinite(number))
-                return '';
-            var isNegative = number < 0;
-            number = Math.abs(number);
-            var numStr = number + '', formatedText = '', parts = [];
-            var hasExponent = false;
-            if (numStr.indexOf('e') !== -1) {
-                var match = numStr.match(/([\d\.]+)e(-?)(\d+)/);
-                if (match && match[2] == '-' && match[3] > fractionSize + 1) {
-                    numStr = '0';
-                } else {
-                    formatedText = numStr;
-                    hasExponent = true;
-                }
+        function parse(numStr) {
+            var exponent = 0, digits, numberOfIntegerDigits;
+            var i, j, zeros;
+            if ((numberOfIntegerDigits = numStr.indexOf(DECIMAL_SEP)) > -1) {
+                numStr = numStr.replace(DECIMAL_SEP, '');
             }
-            if (!hasExponent) {
-                var fractionLen = (numStr.split(DECIMAL_SEP)[1] || '').length;
-                if (isUndefined(fractionSize)) {
-                    fractionSize = Math.min(Math.max(pattern.minFrac, fractionLen), pattern.maxFrac);
-                }
-                var pow = Math.pow(10, fractionSize);
-                number = Math.round(number * pow) / pow;
-                var fraction = ('' + number).split(DECIMAL_SEP);
-                var whole = fraction[0];
-                fraction = fraction[1] || '';
-                var i, pos = 0, lgroup = pattern.lgSize, group = pattern.gSize;
-                if (whole.length >= lgroup + group) {
-                    pos = whole.length - lgroup;
-                    for (i = 0; i < pos; i++) {
-                        if ((pos - i) % group === 0 && i !== 0) {
-                            formatedText += groupSep;
-                        }
-                        formatedText += whole.charAt(i);
-                    }
-                }
-                for (i = pos; i < whole.length; i++) {
-                    if ((whole.length - i) % lgroup === 0 && i !== 0) {
-                        formatedText += groupSep;
-                    }
-                    formatedText += whole.charAt(i);
-                }
-                while (fraction.length < fractionSize) {
-                    fraction += '0';
-                }
-                if (fractionSize && fractionSize !== '0')
-                    formatedText += decimalSep + fraction.substr(0, fractionSize);
+            if ((i = numStr.search(/e/i)) > 0) {
+                if (numberOfIntegerDigits < 0)
+                    numberOfIntegerDigits = i;
+                numberOfIntegerDigits += +numStr.slice(i + 1);
+                numStr = numStr.substring(0, i);
+            } else if (numberOfIntegerDigits < 0) {
+                numberOfIntegerDigits = numStr.length;
+            }
+            for (i = 0; numStr.charAt(i) == ZERO_CHAR; i++) {
+            }
+            if (i == (zeros = numStr.length)) {
+                digits = [0];
+                numberOfIntegerDigits = 1;
             } else {
-                if (fractionSize > 0 && number > -1 && number < 1) {
-                    formatedText = number.toFixed(fractionSize);
+                zeros--;
+                while (numStr.charAt(zeros) == ZERO_CHAR)
+                    zeros--;
+                numberOfIntegerDigits -= i;
+                digits = [];
+                for (j = 0; i <= zeros; i++, j++) {
+                    digits[j] = +numStr.charAt(i);
                 }
             }
-            parts.push(isNegative ? pattern.negPre : pattern.posPre);
-            parts.push(formatedText);
-            parts.push(isNegative ? pattern.negSuf : pattern.posSuf);
-            return parts.join('');
+            if (numberOfIntegerDigits > MAX_DIGITS) {
+                digits = digits.splice(0, MAX_DIGITS - 1);
+                exponent = numberOfIntegerDigits - 1;
+                numberOfIntegerDigits = 1;
+            }
+            return {
+                d: digits,
+                e: exponent,
+                i: numberOfIntegerDigits
+            };
         }
-        function padNumber(num, digits, trim) {
+        function roundNumber(parsedNumber, fractionSize, minFrac, maxFrac) {
+            var digits = parsedNumber.d;
+            var fractionLen = digits.length - parsedNumber.i;
+            fractionSize = isUndefined(fractionSize) ? Math.min(Math.max(minFrac, fractionLen), maxFrac) : +fractionSize;
+            var roundAt = fractionSize + parsedNumber.i;
+            var digit = digits[roundAt];
+            if (roundAt > 0) {
+                digits.splice(Math.max(parsedNumber.i, roundAt));
+                for (var j = roundAt; j < digits.length; j++) {
+                    digits[j] = 0;
+                }
+            } else {
+                fractionLen = Math.max(0, fractionLen);
+                parsedNumber.i = 1;
+                digits.length = Math.max(1, roundAt = fractionSize + 1);
+                digits[0] = 0;
+                for (var i = 1; i < roundAt; i++)
+                    digits[i] = 0;
+            }
+            if (digit >= 5) {
+                if (roundAt - 1 < 0) {
+                    for (var k = 0; k > roundAt; k--) {
+                        digits.unshift(0);
+                        parsedNumber.i++;
+                    }
+                    digits.unshift(1);
+                    parsedNumber.i++;
+                } else {
+                    digits[roundAt - 1]++;
+                }
+            }
+            for (; fractionLen < Math.max(0, fractionSize); fractionLen++)
+                digits.push(0);
+            var carry = digits.reduceRight(function (carry, d, i, digits) {
+                d = d + carry;
+                digits[i] = d % 10;
+                return Math.floor(d / 10);
+            }, 0);
+            if (carry) {
+                digits.unshift(carry);
+                parsedNumber.i++;
+            }
+        }
+        function formatNumber(number, pattern, groupSep, decimalSep, fractionSize) {
+            if (!(isString(number) || isNumber(number)) || isNaN(number))
+                return '';
+            var isInfinity = !isFinite(number);
+            var isZero = false;
+            var numStr = Math.abs(number) + '', formattedText = '', parsedNumber;
+            if (isInfinity) {
+                formattedText = '\u221E';
+            } else {
+                parsedNumber = parse(numStr);
+                roundNumber(parsedNumber, fractionSize, pattern.minFrac, pattern.maxFrac);
+                var digits = parsedNumber.d;
+                var integerLen = parsedNumber.i;
+                var exponent = parsedNumber.e;
+                var decimals = [];
+                isZero = digits.reduce(function (isZero, d) {
+                    return isZero && !d;
+                }, true);
+                while (integerLen < 0) {
+                    digits.unshift(0);
+                    integerLen++;
+                }
+                if (integerLen > 0) {
+                    decimals = digits.splice(integerLen);
+                } else {
+                    decimals = digits;
+                    digits = [0];
+                }
+                var groups = [];
+                if (digits.length >= pattern.lgSize) {
+                    groups.unshift(digits.splice(-pattern.lgSize).join(''));
+                }
+                while (digits.length > pattern.gSize) {
+                    groups.unshift(digits.splice(-pattern.gSize).join(''));
+                }
+                if (digits.length) {
+                    groups.unshift(digits.join(''));
+                }
+                formattedText = groups.join(groupSep);
+                if (decimals.length) {
+                    formattedText += decimalSep + decimals.join('');
+                }
+                if (exponent) {
+                    formattedText += 'e+' + exponent;
+                }
+            }
+            if (number < 0 && !isZero) {
+                return pattern.negPre + formattedText + pattern.negSuf;
+            } else {
+                return pattern.posPre + formattedText + pattern.posSuf;
+            }
+        }
+        function padNumber(num, digits, trim, negWrap) {
             var neg = '';
-            if (num < 0) {
-                neg = '-';
-                num = -num;
+            if (num < 0 || negWrap && num <= 0) {
+                if (negWrap) {
+                    num = -num + 1;
+                } else {
+                    num = -num;
+                    neg = '-';
+                }
             }
             num = '' + num;
             while (num.length < digits)
-                num = '0' + num;
-            if (trim)
+                num = ZERO_CHAR + num;
+            if (trim) {
                 num = num.substr(num.length - digits);
+            }
             return neg + num;
         }
-        function dateGetter(name, size, offset, trim) {
+        function dateGetter(name, size, offset, trim, negWrap) {
             offset = offset || 0;
             return function (date) {
                 var value = date['get' + name]();
-                if (offset > 0 || value > -offset)
+                if (offset > 0 || value > -offset) {
                     value += offset;
+                }
                 if (value === 0 && offset == -12)
                     value = 12;
-                return padNumber(value, size, trim);
+                return padNumber(value, size, trim, negWrap);
             };
         }
-        function dateStrGetter(name, shortForm) {
+        function dateStrGetter(name, shortForm, standAlone) {
             return function (date, formats) {
                 var value = date['get' + name]();
-                var get = uppercase(shortForm ? 'SHORT' + name : name);
+                var propPrefix = (standAlone ? 'STANDALONE' : '') + (shortForm ? 'SHORT' : '');
+                var get = uppercase(propPrefix + name);
                 return formats[get][value];
             };
         }
-        function timeZoneGetter(date) {
-            var zone = -1 * date.getTimezoneOffset();
+        function timeZoneGetter(date, formats, offset) {
+            var zone = -1 * offset;
             var paddedZone = zone >= 0 ? '+' : '';
             paddedZone += padNumber(Math[zone > 0 ? 'floor' : 'ceil'](zone / 60), 2) + padNumber(Math.abs(zone % 60), 2);
             return paddedZone;
         }
+        function getFirstThursdayOfYear(year) {
+            var dayOfWeekOnFirst = new Date(year, 0, 1).getDay();
+            return new Date(year, 0, (dayOfWeekOnFirst <= 4 ? 5 : 12) - dayOfWeekOnFirst);
+        }
+        function getThursdayThisWeek(datetime) {
+            return new Date(datetime.getFullYear(), datetime.getMonth(), datetime.getDate() + (4 - datetime.getDay()));
+        }
+        function weekGetter(size) {
+            return function (date) {
+                var firstThurs = getFirstThursdayOfYear(date.getFullYear()), thisThurs = getThursdayThisWeek(date);
+                var diff = +thisThurs - +firstThurs, result = 1 + Math.round(diff / 604800000);
+                return padNumber(result, size);
+            };
+        }
         function ampmGetter(date, formats) {
             return date.getHours() < 12 ? formats.AMPMS[0] : formats.AMPMS[1];
         }
+        function eraGetter(date, formats) {
+            return date.getFullYear() <= 0 ? formats.ERAS[0] : formats.ERAS[1];
+        }
+        function longEraGetter(date, formats) {
+            return date.getFullYear() <= 0 ? formats.ERANAMES[0] : formats.ERANAMES[1];
+        }
         var DATE_FORMATS = {
-            yyyy: dateGetter('FullYear', 4),
-            yy: dateGetter('FullYear', 2, 0, true),
-            y: dateGetter('FullYear', 1),
+            yyyy: dateGetter('FullYear', 4, 0, false, true),
+            yy: dateGetter('FullYear', 2, 0, true, true),
+            y: dateGetter('FullYear', 1, 0, false, true),
             MMMM: dateStrGetter('Month'),
             MMM: dateStrGetter('Month', true),
             MM: dateGetter('Month', 2, 1),
             M: dateGetter('Month', 1, 1),
+            LLLL: dateStrGetter('Month', false, true),
             dd: dateGetter('Date', 2),
             d: dateGetter('Date', 1),
             HH: dateGetter('Hours', 2),
@@ -6047,9 +9199,15 @@ define('angular', [], function () {
             EEEE: dateStrGetter('Day'),
             EEE: dateStrGetter('Day', true),
             a: ampmGetter,
-            Z: timeZoneGetter
+            Z: timeZoneGetter,
+            ww: weekGetter(2),
+            w: weekGetter(1),
+            G: eraGetter,
+            GG: eraGetter,
+            GGG: eraGetter,
+            GGGG: longEraGetter
         };
-        var DATE_FORMATS_SPLIT = /((?:[^yMdHhmsaZE']+)|(?:'(?:[^']|'')*')|(?:E+|y+|M+|d+|H+|h+|m+|s+|a|Z))(.*)/, NUMBER_STRING = /^\-?\d+$/;
+        var DATE_FORMATS_SPLIT = /((?:[^yMLdHhmsaZEwG']+)|(?:'(?:[^']|'')*')|(?:E+|y+|M+|L+|d+|H+|h+|m+|s+|a|Z|G+|w+))(.*)/, NUMBER_STRING = /^\-?\d+$/;
         dateFilter.$inject = ['$locale'];
         function dateFilter($locale) {
             var R_ISO8601_STR = /^(\d{4})-?(\d\d)-?(\d\d)(?:T(\d\d)(?::?(\d\d)(?::?(\d\d)(?:\.(\d+))?)?)?(Z|([+-])(\d\d):?(\d\d))?)?$/;
@@ -6058,34 +9216,30 @@ define('angular', [], function () {
                 if (match = string.match(R_ISO8601_STR)) {
                     var date = new Date(0), tzHour = 0, tzMin = 0, dateSetter = match[8] ? date.setUTCFullYear : date.setFullYear, timeSetter = match[8] ? date.setUTCHours : date.setHours;
                     if (match[9]) {
-                        tzHour = int(match[9] + match[10]);
-                        tzMin = int(match[9] + match[11]);
+                        tzHour = toInt(match[9] + match[10]);
+                        tzMin = toInt(match[9] + match[11]);
                     }
-                    dateSetter.call(date, int(match[1]), int(match[2]) - 1, int(match[3]));
-                    var h = int(match[4] || 0) - tzHour;
-                    var m = int(match[5] || 0) - tzMin;
-                    var s = int(match[6] || 0);
+                    dateSetter.call(date, toInt(match[1]), toInt(match[2]) - 1, toInt(match[3]));
+                    var h = toInt(match[4] || 0) - tzHour;
+                    var m = toInt(match[5] || 0) - tzMin;
+                    var s = toInt(match[6] || 0);
                     var ms = Math.round(parseFloat('0.' + (match[7] || 0)) * 1000);
                     timeSetter.call(date, h, m, s, ms);
                     return date;
                 }
                 return string;
             }
-            return function (date, format) {
+            return function (date, format, timezone) {
                 var text = '', parts = [], fn, match;
                 format = format || 'mediumDate';
                 format = $locale.DATETIME_FORMATS[format] || format;
                 if (isString(date)) {
-                    if (NUMBER_STRING.test(date)) {
-                        date = int(date);
-                    } else {
-                        date = jsonStringToDate(date);
-                    }
+                    date = NUMBER_STRING.test(date) ? toInt(date) : jsonStringToDate(date);
                 }
                 if (isNumber(date)) {
                     date = new Date(date);
                 }
-                if (!isDate(date)) {
+                if (!isDate(date) || !isFinite(date.getTime())) {
                     return date;
                 }
                 while (format) {
@@ -6098,105 +9252,175 @@ define('angular', [], function () {
                         format = null;
                     }
                 }
+                var dateTimezoneOffset = date.getTimezoneOffset();
+                if (timezone) {
+                    dateTimezoneOffset = timezoneToOffset(timezone, dateTimezoneOffset);
+                    date = convertTimezoneToLocal(date, timezone, true);
+                }
                 forEach(parts, function (value) {
                     fn = DATE_FORMATS[value];
-                    text += fn ? fn(date, $locale.DATETIME_FORMATS) : value.replace(/(^'|'$)/g, '').replace(/''/g, '\'');
+                    text += fn ? fn(date, $locale.DATETIME_FORMATS, dateTimezoneOffset) : value === '\'\'' ? '\'' : value.replace(/(^'|'$)/g, '').replace(/''/g, '\'');
                 });
                 return text;
             };
         }
         function jsonFilter() {
-            return function (object) {
-                return toJson(object, true);
+            return function (object, spacing) {
+                if (isUndefined(spacing)) {
+                    spacing = 2;
+                }
+                return toJson(object, spacing);
             };
         }
         var lowercaseFilter = valueFn(lowercase);
         var uppercaseFilter = valueFn(uppercase);
         function limitToFilter() {
-            return function (input, limit) {
+            return function (input, limit, begin) {
+                if (Math.abs(Number(limit)) === Infinity) {
+                    limit = Number(limit);
+                } else {
+                    limit = toInt(limit);
+                }
+                if (isNaN(limit))
+                    return input;
+                if (isNumber(input))
+                    input = input.toString();
                 if (!isArray(input) && !isString(input))
                     return input;
-                limit = int(limit);
-                if (isString(input)) {
-                    if (limit) {
-                        return limit >= 0 ? input.slice(0, limit) : input.slice(limit, input.length);
+                begin = !begin || isNaN(begin) ? 0 : toInt(begin);
+                begin = begin < 0 ? Math.max(0, input.length + begin) : begin;
+                if (limit >= 0) {
+                    return input.slice(begin, begin + limit);
+                } else {
+                    if (begin === 0) {
+                        return input.slice(limit, input.length);
                     } else {
-                        return '';
+                        return input.slice(Math.max(0, begin + limit), begin);
                     }
                 }
-                var out = [], i, n;
-                if (limit > input.length)
-                    limit = input.length;
-                else if (limit < -input.length)
-                    limit = -input.length;
-                if (limit > 0) {
-                    i = 0;
-                    n = limit;
-                } else {
-                    i = input.length + limit;
-                    n = input.length;
-                }
-                for (; i < n; i++) {
-                    out.push(input[i]);
-                }
-                return out;
             };
         }
         orderByFilter.$inject = ['$parse'];
         function orderByFilter($parse) {
             return function (array, sortPredicate, reverseOrder) {
-                if (!isArray(array))
+                if (array == null)
                     return array;
-                if (!sortPredicate)
-                    return array;
-                sortPredicate = isArray(sortPredicate) ? sortPredicate : [sortPredicate];
-                sortPredicate = map(sortPredicate, function (predicate) {
-                    var descending = false, get = predicate || identity;
-                    if (isString(predicate)) {
-                        if (predicate.charAt(0) == '+' || predicate.charAt(0) == '-') {
-                            descending = predicate.charAt(0) == '-';
-                            predicate = predicate.substring(1);
-                        }
-                        get = $parse(predicate);
-                    }
-                    return reverseComparator(function (a, b) {
-                        return compare(get(a), get(b));
-                    }, descending);
+                if (!isArrayLike(array)) {
+                    throw minErr('orderBy')('notarray', 'Expected array but received: {0}', array);
+                }
+                if (!isArray(sortPredicate)) {
+                    sortPredicate = [sortPredicate];
+                }
+                if (sortPredicate.length === 0) {
+                    sortPredicate = ['+'];
+                }
+                var predicates = processPredicates(sortPredicate, reverseOrder);
+                predicates.push({
+                    get: function () {
+                        return {};
+                    },
+                    descending: reverseOrder ? -1 : 1
                 });
-                var arrayCopy = [];
-                for (var i = 0; i < array.length; i++) {
-                    arrayCopy.push(array[i]);
+                var compareValues = Array.prototype.map.call(array, getComparisonObject);
+                compareValues.sort(doComparison);
+                array = compareValues.map(function (item) {
+                    return item.value;
+                });
+                return array;
+                function getComparisonObject(value, index) {
+                    return {
+                        value: value,
+                        predicateValues: predicates.map(function (predicate) {
+                            return getPredicateValue(predicate.get(value), index);
+                        })
+                    };
                 }
-                return arrayCopy.sort(reverseComparator(comparator, reverseOrder));
-                function comparator(o1, o2) {
-                    for (var i = 0; i < sortPredicate.length; i++) {
-                        var comp = sortPredicate[i](o1, o2);
-                        if (comp !== 0)
-                            return comp;
+                function doComparison(v1, v2) {
+                    var result = 0;
+                    for (var index = 0, length = predicates.length; index < length; ++index) {
+                        result = compare(v1.predicateValues[index], v2.predicateValues[index]) * predicates[index].descending;
+                        if (result)
+                            break;
                     }
-                    return 0;
-                }
-                function reverseComparator(comp, descending) {
-                    return toBoolean(descending) ? function (a, b) {
-                        return comp(b, a);
-                    } : comp;
-                }
-                function compare(v1, v2) {
-                    var t1 = typeof v1;
-                    var t2 = typeof v2;
-                    if (t1 == t2) {
-                        if (t1 == 'string') {
-                            v1 = v1.toLowerCase();
-                            v2 = v2.toLowerCase();
-                        }
-                        if (v1 === v2)
-                            return 0;
-                        return v1 < v2 ? -1 : 1;
-                    } else {
-                        return t1 < t2 ? -1 : 1;
-                    }
+                    return result;
                 }
             };
+            function processPredicates(sortPredicate, reverseOrder) {
+                reverseOrder = reverseOrder ? -1 : 1;
+                return sortPredicate.map(function (predicate) {
+                    var descending = 1, get = identity;
+                    if (isFunction(predicate)) {
+                        get = predicate;
+                    } else if (isString(predicate)) {
+                        if (predicate.charAt(0) == '+' || predicate.charAt(0) == '-') {
+                            descending = predicate.charAt(0) == '-' ? -1 : 1;
+                            predicate = predicate.substring(1);
+                        }
+                        if (predicate !== '') {
+                            get = $parse(predicate);
+                            if (get.constant) {
+                                var key = get();
+                                get = function (value) {
+                                    return value[key];
+                                };
+                            }
+                        }
+                    }
+                    return {
+                        get: get,
+                        descending: descending * reverseOrder
+                    };
+                });
+            }
+            function isPrimitive(value) {
+                switch (typeof value) {
+                case 'number':
+                case 'boolean':
+                case 'string':
+                    return true;
+                default:
+                    return false;
+                }
+            }
+            function objectValue(value, index) {
+                if (typeof value.valueOf === 'function') {
+                    value = value.valueOf();
+                    if (isPrimitive(value))
+                        return value;
+                }
+                if (hasCustomToString(value)) {
+                    value = value.toString();
+                    if (isPrimitive(value))
+                        return value;
+                }
+                return index;
+            }
+            function getPredicateValue(value, index) {
+                var type = typeof value;
+                if (value === null) {
+                    type = 'string';
+                    value = 'null';
+                } else if (type === 'string') {
+                    value = value.toLowerCase();
+                } else if (type === 'object') {
+                    value = objectValue(value, index);
+                }
+                return {
+                    value: value,
+                    type: type
+                };
+            }
+            function compare(v1, v2) {
+                var result = 0;
+                if (v1.type === v2.type) {
+                    if (v1.value !== v2.value) {
+                        result = v1.value < v2.value ? -1 : 1;
+                    }
+                } else {
+                    result = v1.type < v2.type ? -1 : 1;
+                }
+                return result;
+            }
         }
         function ngDirective(directive) {
             if (isFunction(directive)) {
@@ -6208,35 +9432,61 @@ define('angular', [], function () {
         var htmlAnchorDirective = valueFn({
             restrict: 'E',
             compile: function (element, attr) {
-                if (msie <= 8) {
-                    if (!attr.href && !attr.name) {
-                        attr.$set('href', '');
-                    }
-                    element.append(document.createComment('IE fix'));
+                if (!attr.href && !attr.xlinkHref) {
+                    return function (scope, element) {
+                        if (element[0].nodeName.toLowerCase() !== 'a')
+                            return;
+                        var href = toString.call(element.prop('href')) === '[object SVGAnimatedString]' ? 'xlink:href' : 'href';
+                        element.on('click', function (event) {
+                            if (!element.attr(href)) {
+                                event.preventDefault();
+                            }
+                        });
+                    };
                 }
-                return function (scope, element) {
-                    element.on('click', function (event) {
-                        if (!element.attr('href')) {
-                            event.preventDefault();
-                        }
-                    });
-                };
             }
         });
         var ngAttributeAliasDirectives = {};
         forEach(BOOLEAN_ATTR, function (propName, attrName) {
             if (propName == 'multiple')
                 return;
+            function defaultLinkFn(scope, element, attr) {
+                scope.$watch(attr[normalized], function ngBooleanAttrWatchAction(value) {
+                    attr.$set(attrName, !!value);
+                });
+            }
             var normalized = directiveNormalize('ng-' + attrName);
+            var linkFn = defaultLinkFn;
+            if (propName === 'checked') {
+                linkFn = function (scope, element, attr) {
+                    if (attr.ngModel !== attr[normalized]) {
+                        defaultLinkFn(scope, element, attr);
+                    }
+                };
+            }
             ngAttributeAliasDirectives[normalized] = function () {
                 return {
+                    restrict: 'A',
                     priority: 100,
-                    compile: function () {
-                        return function (scope, element, attr) {
-                            scope.$watch(attr[normalized], function ngBooleanAttrWatchAction(value) {
-                                attr.$set(attrName, !!value);
-                            });
-                        };
+                    link: linkFn
+                };
+            };
+        });
+        forEach(ALIASED_ATTR, function (htmlAttr, ngAttr) {
+            ngAttributeAliasDirectives[ngAttr] = function () {
+                return {
+                    priority: 100,
+                    link: function (scope, element, attr) {
+                        if (ngAttr === 'ngPattern' && attr.ngPattern.charAt(0) == '/') {
+                            var match = attr.ngPattern.match(REGEX_STRING_REGEXP);
+                            if (match) {
+                                attr.$set('ngPattern', new RegExp(match[1], match[2]));
+                                return;
+                            }
+                        }
+                        scope.$watch(attr[ngAttr], function ngAttrAliasWatchAction(value) {
+                            attr.$set(ngAttr, value);
+                        });
                     }
                 };
             };
@@ -6251,159 +9501,263 @@ define('angular', [], function () {
                 return {
                     priority: 99,
                     link: function (scope, element, attr) {
+                        var propName = attrName, name = attrName;
+                        if (attrName === 'href' && toString.call(element.prop('href')) === '[object SVGAnimatedString]') {
+                            name = 'xlinkHref';
+                            attr.$attr[name] = 'xlink:href';
+                            propName = null;
+                        }
                         attr.$observe(normalized, function (value) {
-                            if (!value)
+                            if (!value) {
+                                if (attrName === 'href') {
+                                    attr.$set(name, null);
+                                }
                                 return;
-                            attr.$set(attrName, value);
-                            if (msie)
-                                element.prop(attrName, attr[attrName]);
+                            }
+                            attr.$set(name, value);
+                            if (msie && propName)
+                                element.prop(propName, attr[name]);
                         });
                     }
                 };
             };
         });
         var nullFormCtrl = {
-            $addControl: noop,
-            $removeControl: noop,
-            $setValidity: noop,
-            $setDirty: noop,
-            $setPristine: noop
-        };
+                $addControl: noop,
+                $$renameControl: nullFormRenameControl,
+                $removeControl: noop,
+                $setValidity: noop,
+                $setDirty: noop,
+                $setPristine: noop,
+                $setSubmitted: noop
+            }, SUBMITTED_CLASS = 'ng-submitted';
+        function nullFormRenameControl(control, name) {
+            control.$name = name;
+        }
         FormController.$inject = [
             '$element',
             '$attrs',
-            '$scope'
+            '$scope',
+            '$animate',
+            '$interpolate'
         ];
-        function FormController(element, attrs) {
-            var form = this, parentForm = element.parent().controller('form') || nullFormCtrl, invalidCount = 0, errors = form.$error = {}, controls = [];
-            form.$name = attrs.name || attrs.ngForm;
+        function FormController(element, attrs, $scope, $animate, $interpolate) {
+            var form = this, controls = [];
+            form.$error = {};
+            form.$$success = {};
+            form.$pending = undefined;
+            form.$name = $interpolate(attrs.name || attrs.ngForm || '')($scope);
             form.$dirty = false;
             form.$pristine = true;
             form.$valid = true;
             form.$invalid = false;
-            parentForm.$addControl(form);
-            element.addClass(PRISTINE_CLASS);
-            toggleValidCss(true);
-            function toggleValidCss(isValid, validationErrorKey) {
-                validationErrorKey = validationErrorKey ? '-' + snake_case(validationErrorKey, '-') : '';
-                element.removeClass((isValid ? INVALID_CLASS : VALID_CLASS) + validationErrorKey).addClass((isValid ? VALID_CLASS : INVALID_CLASS) + validationErrorKey);
-            }
+            form.$submitted = false;
+            form.$$parentForm = nullFormCtrl;
+            form.$rollbackViewValue = function () {
+                forEach(controls, function (control) {
+                    control.$rollbackViewValue();
+                });
+            };
+            form.$commitViewValue = function () {
+                forEach(controls, function (control) {
+                    control.$commitViewValue();
+                });
+            };
             form.$addControl = function (control) {
                 assertNotHasOwnProperty(control.$name, 'input');
                 controls.push(control);
                 if (control.$name) {
                     form[control.$name] = control;
                 }
+                control.$$parentForm = form;
+            };
+            form.$$renameControl = function (control, newName) {
+                var oldName = control.$name;
+                if (form[oldName] === control) {
+                    delete form[oldName];
+                }
+                form[newName] = control;
+                control.$name = newName;
             };
             form.$removeControl = function (control) {
                 if (control.$name && form[control.$name] === control) {
                     delete form[control.$name];
                 }
-                forEach(errors, function (queue, validationToken) {
-                    form.$setValidity(validationToken, true, control);
+                forEach(form.$pending, function (value, name) {
+                    form.$setValidity(name, null, control);
+                });
+                forEach(form.$error, function (value, name) {
+                    form.$setValidity(name, null, control);
+                });
+                forEach(form.$$success, function (value, name) {
+                    form.$setValidity(name, null, control);
                 });
                 arrayRemove(controls, control);
+                control.$$parentForm = nullFormCtrl;
             };
-            form.$setValidity = function (validationToken, isValid, control) {
-                var queue = errors[validationToken];
-                if (isValid) {
-                    if (queue) {
-                        arrayRemove(queue, control);
-                        if (!queue.length) {
-                            invalidCount--;
-                            if (!invalidCount) {
-                                toggleValidCss(isValid);
-                                form.$valid = true;
-                                form.$invalid = false;
-                            }
-                            errors[validationToken] = false;
-                            toggleValidCss(true, validationToken);
-                            parentForm.$setValidity(validationToken, true, form);
+            addSetValidityMethod({
+                ctrl: this,
+                $element: element,
+                set: function (object, property, controller) {
+                    var list = object[property];
+                    if (!list) {
+                        object[property] = [controller];
+                    } else {
+                        var index = list.indexOf(controller);
+                        if (index === -1) {
+                            list.push(controller);
                         }
                     }
-                } else {
-                    if (!invalidCount) {
-                        toggleValidCss(isValid);
+                },
+                unset: function (object, property, controller) {
+                    var list = object[property];
+                    if (!list) {
+                        return;
                     }
-                    if (queue) {
-                        if (includes(queue, control))
-                            return;
-                    } else {
-                        errors[validationToken] = queue = [];
-                        invalidCount++;
-                        toggleValidCss(false, validationToken);
-                        parentForm.$setValidity(validationToken, false, form);
+                    arrayRemove(list, controller);
+                    if (list.length === 0) {
+                        delete object[property];
                     }
-                    queue.push(control);
-                    form.$valid = false;
-                    form.$invalid = true;
-                }
-            };
+                },
+                $animate: $animate
+            });
             form.$setDirty = function () {
-                element.removeClass(PRISTINE_CLASS).addClass(DIRTY_CLASS);
+                $animate.removeClass(element, PRISTINE_CLASS);
+                $animate.addClass(element, DIRTY_CLASS);
                 form.$dirty = true;
                 form.$pristine = false;
-                parentForm.$setDirty();
+                form.$$parentForm.$setDirty();
             };
             form.$setPristine = function () {
-                element.removeClass(DIRTY_CLASS).addClass(PRISTINE_CLASS);
+                $animate.setClass(element, PRISTINE_CLASS, DIRTY_CLASS + ' ' + SUBMITTED_CLASS);
                 form.$dirty = false;
                 form.$pristine = true;
+                form.$submitted = false;
                 forEach(controls, function (control) {
                     control.$setPristine();
                 });
+            };
+            form.$setUntouched = function () {
+                forEach(controls, function (control) {
+                    control.$setUntouched();
+                });
+            };
+            form.$setSubmitted = function () {
+                $animate.addClass(element, SUBMITTED_CLASS);
+                form.$submitted = true;
+                form.$$parentForm.$setSubmitted();
             };
         }
         var formDirectiveFactory = function (isNgForm) {
             return [
                 '$timeout',
-                function ($timeout) {
+                '$parse',
+                function ($timeout, $parse) {
                     var formDirective = {
                         name: 'form',
                         restrict: isNgForm ? 'EAC' : 'E',
+                        require: [
+                            'form',
+                            '^^?form'
+                        ],
                         controller: FormController,
-                        compile: function () {
+                        compile: function ngFormCompile(formElement, attr) {
+                            formElement.addClass(PRISTINE_CLASS).addClass(VALID_CLASS);
+                            var nameAttr = attr.name ? 'name' : isNgForm && attr.ngForm ? 'ngForm' : false;
                             return {
-                                pre: function (scope, formElement, attr, controller) {
-                                    if (!attr.action) {
-                                        var preventDefaultListener = function (event) {
-                                            event.preventDefault ? event.preventDefault() : event.returnValue = false;
+                                pre: function ngFormPreLink(scope, formElement, attr, ctrls) {
+                                    var controller = ctrls[0];
+                                    if (!('action' in attr)) {
+                                        var handleFormSubmission = function (event) {
+                                            scope.$apply(function () {
+                                                controller.$commitViewValue();
+                                                controller.$setSubmitted();
+                                            });
+                                            event.preventDefault();
                                         };
-                                        addEventListenerFn(formElement[0], 'submit', preventDefaultListener);
+                                        addEventListenerFn(formElement[0], 'submit', handleFormSubmission);
                                         formElement.on('$destroy', function () {
                                             $timeout(function () {
-                                                removeEventListenerFn(formElement[0], 'submit', preventDefaultListener);
+                                                removeEventListenerFn(formElement[0], 'submit', handleFormSubmission);
                                             }, 0, false);
                                         });
                                     }
-                                    var parentFormCtrl = formElement.parent().controller('form'), alias = attr.name || attr.ngForm;
-                                    if (alias) {
-                                        setter(scope, alias, controller, alias);
-                                    }
-                                    if (parentFormCtrl) {
-                                        formElement.on('$destroy', function () {
-                                            parentFormCtrl.$removeControl(controller);
-                                            if (alias) {
-                                                setter(scope, alias, undefined, alias);
-                                            }
-                                            extend(controller, nullFormCtrl);
+                                    var parentFormCtrl = ctrls[1] || controller.$$parentForm;
+                                    parentFormCtrl.$addControl(controller);
+                                    var setter = nameAttr ? getSetter(controller.$name) : noop;
+                                    if (nameAttr) {
+                                        setter(scope, controller);
+                                        attr.$observe(nameAttr, function (newValue) {
+                                            if (controller.$name === newValue)
+                                                return;
+                                            setter(scope, undefined);
+                                            controller.$$parentForm.$$renameControl(controller, newValue);
+                                            setter = getSetter(controller.$name);
+                                            setter(scope, controller);
                                         });
                                     }
+                                    formElement.on('$destroy', function () {
+                                        controller.$$parentForm.$removeControl(controller);
+                                        setter(scope, undefined);
+                                        extend(controller, nullFormCtrl);
+                                    });
                                 }
                             };
                         }
                     };
                     return formDirective;
+                    function getSetter(expression) {
+                        if (expression === '') {
+                            return $parse('this[""]').assign;
+                        }
+                        return $parse(expression).assign || noop;
+                    }
                 }
             ];
         };
         var formDirective = formDirectiveFactory();
         var ngFormDirective = formDirectiveFactory(true);
-        var URL_REGEXP = /^(ftp|http|https):\/\/(\w+:{0,1}\w*@)?(\S+)(:[0-9]+)?(\/|\/([\w#!:.?+=&%@!\-\/]))?$/;
-        var EMAIL_REGEXP = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,6}$/;
-        var NUMBER_REGEXP = /^\s*(\-|\+)?(\d+|(\d*(\.\d*)))\s*$/;
+        var ISO_DATE_REGEXP = /^\d{4,}-[01]\d-[0-3]\dT[0-2]\d:[0-5]\d:[0-5]\d\.\d+(?:[+-][0-2]\d:[0-5]\d|Z)$/;
+        var URL_REGEXP = /^[a-z][a-z\d.+-]*:\/*(?:[^:@]+(?::[^@]+)?@)?(?:[^\s:/?#]+|\[[a-f\d:]+\])(?::\d+)?(?:\/[^?#]*)?(?:\?[^#]*)?(?:#.*)?$/i;
+        var EMAIL_REGEXP = /^[a-z0-9!#$%&'*+\/=?^_`{|}~.-]+@[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i;
+        var NUMBER_REGEXP = /^\s*(\-|\+)?(\d+|(\d*(\.\d*)))([eE][+-]?\d+)?\s*$/;
+        var DATE_REGEXP = /^(\d{4,})-(\d{2})-(\d{2})$/;
+        var DATETIMELOCAL_REGEXP = /^(\d{4,})-(\d\d)-(\d\d)T(\d\d):(\d\d)(?::(\d\d)(\.\d{1,3})?)?$/;
+        var WEEK_REGEXP = /^(\d{4,})-W(\d\d)$/;
+        var MONTH_REGEXP = /^(\d{4,})-(\d\d)$/;
+        var TIME_REGEXP = /^(\d\d):(\d\d)(?::(\d\d)(\.\d{1,3})?)?$/;
+        var PARTIAL_VALIDATION_EVENTS = 'keydown wheel mousedown';
+        var PARTIAL_VALIDATION_TYPES = createMap();
+        forEach('date,datetime-local,month,time,week'.split(','), function (type) {
+            PARTIAL_VALIDATION_TYPES[type] = true;
+        });
         var inputType = {
             'text': textInputType,
+            'date': createDateInputType('date', DATE_REGEXP, createDateParser(DATE_REGEXP, [
+                'yyyy',
+                'MM',
+                'dd'
+            ]), 'yyyy-MM-dd'),
+            'datetime-local': createDateInputType('datetimelocal', DATETIMELOCAL_REGEXP, createDateParser(DATETIMELOCAL_REGEXP, [
+                'yyyy',
+                'MM',
+                'dd',
+                'HH',
+                'mm',
+                'ss',
+                'sss'
+            ]), 'yyyy-MM-ddTHH:mm:ss.sss'),
+            'time': createDateInputType('time', TIME_REGEXP, createDateParser(TIME_REGEXP, [
+                'HH',
+                'mm',
+                'ss',
+                'sss'
+            ]), 'HH:mm:ss.sss'),
+            'week': createDateInputType('week', WEEK_REGEXP, weekParser, 'yyyy-Www'),
+            'month': createDateInputType('month', MONTH_REGEXP, createDateParser(MONTH_REGEXP, [
+                'yyyy',
+                'MM'
+            ]), 'yyyy-MM'),
             'number': numberInputType,
             'url': urlInputType,
             'email': emailInputType,
@@ -6412,38 +9766,56 @@ define('angular', [], function () {
             'hidden': noop,
             'button': noop,
             'submit': noop,
-            'reset': noop
+            'reset': noop,
+            'file': noop
         };
+        function stringBasedInputType(ctrl) {
+            ctrl.$formatters.push(function (value) {
+                return ctrl.$isEmpty(value) ? value : value.toString();
+            });
+        }
         function textInputType(scope, element, attr, ctrl, $sniffer, $browser) {
-            var composing = false;
-            element.on('compositionstart', function () {
-                composing = true;
-            });
-            element.on('compositionend', function () {
-                composing = false;
-            });
-            var listener = function () {
+            baseInputType(scope, element, attr, ctrl, $sniffer, $browser);
+            stringBasedInputType(ctrl);
+        }
+        function baseInputType(scope, element, attr, ctrl, $sniffer, $browser) {
+            var type = lowercase(element[0].type);
+            if (!$sniffer.android) {
+                var composing = false;
+                element.on('compositionstart', function () {
+                    composing = true;
+                });
+                element.on('compositionend', function () {
+                    composing = false;
+                    listener();
+                });
+            }
+            var timeout;
+            var listener = function (ev) {
+                if (timeout) {
+                    $browser.defer.cancel(timeout);
+                    timeout = null;
+                }
                 if (composing)
                     return;
-                var value = element.val();
-                if (toBoolean(attr.ngTrim || 'T')) {
+                var value = element.val(), event = ev && ev.type;
+                if (type !== 'password' && (!attr.ngTrim || attr.ngTrim !== 'false')) {
                     value = trim(value);
                 }
-                if (ctrl.$viewValue !== value) {
-                    scope.$apply(function () {
-                        ctrl.$setViewValue(value);
-                    });
+                if (ctrl.$viewValue !== value || value === '' && ctrl.$$hasNativeValidators) {
+                    ctrl.$setViewValue(value, event);
                 }
             };
             if ($sniffer.hasEvent('input')) {
                 element.on('input', listener);
             } else {
-                var timeout;
-                var deferListener = function () {
+                var deferListener = function (ev, input, origValue) {
                     if (!timeout) {
                         timeout = $browser.defer(function () {
-                            listener();
                             timeout = null;
+                            if (!input || input.value !== origValue) {
+                                listener(ev);
+                            }
                         });
                     }
                 };
@@ -6451,191 +9823,283 @@ define('angular', [], function () {
                     var key = event.keyCode;
                     if (key === 91 || 15 < key && key < 19 || 37 <= key && key <= 40)
                         return;
-                    deferListener();
+                    deferListener(event, this, this.value);
                 });
                 if ($sniffer.hasEvent('paste')) {
                     element.on('paste cut', deferListener);
                 }
             }
             element.on('change', listener);
+            if (PARTIAL_VALIDATION_TYPES[type] && ctrl.$$hasNativeValidators && type === attr.type) {
+                element.on(PARTIAL_VALIDATION_EVENTS, function (ev) {
+                    if (!timeout) {
+                        var validity = this[VALIDITY_STATE_PROPERTY];
+                        var origBadInput = validity.badInput;
+                        var origTypeMismatch = validity.typeMismatch;
+                        timeout = $browser.defer(function () {
+                            timeout = null;
+                            if (validity.badInput !== origBadInput || validity.typeMismatch !== origTypeMismatch) {
+                                listener(ev);
+                            }
+                        });
+                    }
+                });
+            }
             ctrl.$render = function () {
-                element.val(ctrl.$isEmpty(ctrl.$viewValue) ? '' : ctrl.$viewValue);
-            };
-            var pattern = attr.ngPattern, patternValidator, match;
-            var validate = function (regexp, value) {
-                if (ctrl.$isEmpty(value) || regexp.test(value)) {
-                    ctrl.$setValidity('pattern', true);
-                    return value;
-                } else {
-                    ctrl.$setValidity('pattern', false);
-                    return undefined;
+                var value = ctrl.$isEmpty(ctrl.$viewValue) ? '' : ctrl.$viewValue;
+                if (element.val() !== value) {
+                    element.val(value);
                 }
             };
-            if (pattern) {
-                match = pattern.match(/^\/(.*)\/([gim]*)$/);
-                if (match) {
-                    pattern = new RegExp(match[1], match[2]);
-                    patternValidator = function (value) {
-                        return validate(pattern, value);
-                    };
-                } else {
-                    patternValidator = function (value) {
-                        var patternObj = scope.$eval(pattern);
-                        if (!patternObj || !patternObj.test) {
-                            throw minErr('ngPattern')('noregexp', 'Expected {0} to be a RegExp but was {1}. Element: {2}', pattern, patternObj, startingTag(element));
+        }
+        function weekParser(isoWeek, existingDate) {
+            if (isDate(isoWeek)) {
+                return isoWeek;
+            }
+            if (isString(isoWeek)) {
+                WEEK_REGEXP.lastIndex = 0;
+                var parts = WEEK_REGEXP.exec(isoWeek);
+                if (parts) {
+                    var year = +parts[1], week = +parts[2], hours = 0, minutes = 0, seconds = 0, milliseconds = 0, firstThurs = getFirstThursdayOfYear(year), addDays = (week - 1) * 7;
+                    if (existingDate) {
+                        hours = existingDate.getHours();
+                        minutes = existingDate.getMinutes();
+                        seconds = existingDate.getSeconds();
+                        milliseconds = existingDate.getMilliseconds();
+                    }
+                    return new Date(year, 0, firstThurs.getDate() + addDays, hours, minutes, seconds, milliseconds);
+                }
+            }
+            return NaN;
+        }
+        function createDateParser(regexp, mapping) {
+            return function (iso, date) {
+                var parts, map;
+                if (isDate(iso)) {
+                    return iso;
+                }
+                if (isString(iso)) {
+                    if (iso.charAt(0) == '"' && iso.charAt(iso.length - 1) == '"') {
+                        iso = iso.substring(1, iso.length - 1);
+                    }
+                    if (ISO_DATE_REGEXP.test(iso)) {
+                        return new Date(iso);
+                    }
+                    regexp.lastIndex = 0;
+                    parts = regexp.exec(iso);
+                    if (parts) {
+                        parts.shift();
+                        if (date) {
+                            map = {
+                                yyyy: date.getFullYear(),
+                                MM: date.getMonth() + 1,
+                                dd: date.getDate(),
+                                HH: date.getHours(),
+                                mm: date.getMinutes(),
+                                ss: date.getSeconds(),
+                                sss: date.getMilliseconds() / 1000
+                            };
+                        } else {
+                            map = {
+                                yyyy: 1970,
+                                MM: 1,
+                                dd: 1,
+                                HH: 0,
+                                mm: 0,
+                                ss: 0,
+                                sss: 0
+                            };
                         }
-                        return validate(patternObj, value);
-                    };
+                        forEach(parts, function (part, index) {
+                            if (index < mapping.length) {
+                                map[mapping[index]] = +part;
+                            }
+                        });
+                        return new Date(map.yyyy, map.MM - 1, map.dd, map.HH, map.mm, map.ss || 0, map.sss * 1000 || 0);
+                    }
                 }
-                ctrl.$formatters.push(patternValidator);
-                ctrl.$parsers.push(patternValidator);
-            }
-            if (attr.ngMinlength) {
-                var minlength = int(attr.ngMinlength);
-                var minLengthValidator = function (value) {
-                    if (!ctrl.$isEmpty(value) && value.length < minlength) {
-                        ctrl.$setValidity('minlength', false);
-                        return undefined;
-                    } else {
-                        ctrl.$setValidity('minlength', true);
-                        return value;
+                return NaN;
+            };
+        }
+        function createDateInputType(type, regexp, parseDate, format) {
+            return function dynamicDateInputType(scope, element, attr, ctrl, $sniffer, $browser, $filter) {
+                badInputChecker(scope, element, attr, ctrl);
+                baseInputType(scope, element, attr, ctrl, $sniffer, $browser);
+                var timezone = ctrl && ctrl.$options && ctrl.$options.timezone;
+                var previousDate;
+                ctrl.$$parserName = type;
+                ctrl.$parsers.push(function (value) {
+                    if (ctrl.$isEmpty(value))
+                        return null;
+                    if (regexp.test(value)) {
+                        var parsedDate = parseDate(value, previousDate);
+                        if (timezone) {
+                            parsedDate = convertTimezoneToLocal(parsedDate, timezone);
+                        }
+                        return parsedDate;
                     }
-                };
-                ctrl.$parsers.push(minLengthValidator);
-                ctrl.$formatters.push(minLengthValidator);
-            }
-            if (attr.ngMaxlength) {
-                var maxlength = int(attr.ngMaxlength);
-                var maxLengthValidator = function (value) {
-                    if (!ctrl.$isEmpty(value) && value.length > maxlength) {
-                        ctrl.$setValidity('maxlength', false);
-                        return undefined;
-                    } else {
-                        ctrl.$setValidity('maxlength', true);
-                        return value;
+                    return undefined;
+                });
+                ctrl.$formatters.push(function (value) {
+                    if (value && !isDate(value)) {
+                        throw ngModelMinErr('datefmt', 'Expected `{0}` to be a date', value);
                     }
-                };
-                ctrl.$parsers.push(maxLengthValidator);
-                ctrl.$formatters.push(maxLengthValidator);
+                    if (isValidDate(value)) {
+                        previousDate = value;
+                        if (previousDate && timezone) {
+                            previousDate = convertTimezoneToLocal(previousDate, timezone, true);
+                        }
+                        return $filter('date')(value, format, timezone);
+                    } else {
+                        previousDate = null;
+                        return '';
+                    }
+                });
+                if (isDefined(attr.min) || attr.ngMin) {
+                    var minVal;
+                    ctrl.$validators.min = function (value) {
+                        return !isValidDate(value) || isUndefined(minVal) || parseDate(value) >= minVal;
+                    };
+                    attr.$observe('min', function (val) {
+                        minVal = parseObservedDateValue(val);
+                        ctrl.$validate();
+                    });
+                }
+                if (isDefined(attr.max) || attr.ngMax) {
+                    var maxVal;
+                    ctrl.$validators.max = function (value) {
+                        return !isValidDate(value) || isUndefined(maxVal) || parseDate(value) <= maxVal;
+                    };
+                    attr.$observe('max', function (val) {
+                        maxVal = parseObservedDateValue(val);
+                        ctrl.$validate();
+                    });
+                }
+                function isValidDate(value) {
+                    return value && !(value.getTime && value.getTime() !== value.getTime());
+                }
+                function parseObservedDateValue(val) {
+                    return isDefined(val) && !isDate(val) ? parseDate(val) || undefined : val;
+                }
+            };
+        }
+        function badInputChecker(scope, element, attr, ctrl) {
+            var node = element[0];
+            var nativeValidation = ctrl.$$hasNativeValidators = isObject(node.validity);
+            if (nativeValidation) {
+                ctrl.$parsers.push(function (value) {
+                    var validity = element.prop(VALIDITY_STATE_PROPERTY) || {};
+                    return validity.badInput || validity.typeMismatch ? undefined : value;
+                });
             }
         }
         function numberInputType(scope, element, attr, ctrl, $sniffer, $browser) {
-            textInputType(scope, element, attr, ctrl, $sniffer, $browser);
+            badInputChecker(scope, element, attr, ctrl);
+            baseInputType(scope, element, attr, ctrl, $sniffer, $browser);
+            ctrl.$$parserName = 'number';
             ctrl.$parsers.push(function (value) {
-                var empty = ctrl.$isEmpty(value);
-                if (empty || NUMBER_REGEXP.test(value)) {
-                    ctrl.$setValidity('number', true);
-                    return value === '' ? null : empty ? value : parseFloat(value);
-                } else {
-                    ctrl.$setValidity('number', false);
-                    return undefined;
-                }
+                if (ctrl.$isEmpty(value))
+                    return null;
+                if (NUMBER_REGEXP.test(value))
+                    return parseFloat(value);
+                return undefined;
             });
             ctrl.$formatters.push(function (value) {
-                return ctrl.$isEmpty(value) ? '' : '' + value;
-            });
-            if (attr.min) {
-                var minValidator = function (value) {
-                    var min = parseFloat(attr.min);
-                    if (!ctrl.$isEmpty(value) && value < min) {
-                        ctrl.$setValidity('min', false);
-                        return undefined;
-                    } else {
-                        ctrl.$setValidity('min', true);
-                        return value;
+                if (!ctrl.$isEmpty(value)) {
+                    if (!isNumber(value)) {
+                        throw ngModelMinErr('numfmt', 'Expected `{0}` to be a number', value);
                     }
-                };
-                ctrl.$parsers.push(minValidator);
-                ctrl.$formatters.push(minValidator);
-            }
-            if (attr.max) {
-                var maxValidator = function (value) {
-                    var max = parseFloat(attr.max);
-                    if (!ctrl.$isEmpty(value) && value > max) {
-                        ctrl.$setValidity('max', false);
-                        return undefined;
-                    } else {
-                        ctrl.$setValidity('max', true);
-                        return value;
-                    }
-                };
-                ctrl.$parsers.push(maxValidator);
-                ctrl.$formatters.push(maxValidator);
-            }
-            ctrl.$formatters.push(function (value) {
-                if (ctrl.$isEmpty(value) || isNumber(value)) {
-                    ctrl.$setValidity('number', true);
-                    return value;
-                } else {
-                    ctrl.$setValidity('number', false);
-                    return undefined;
+                    value = value.toString();
                 }
+                return value;
             });
+            if (isDefined(attr.min) || attr.ngMin) {
+                var minVal;
+                ctrl.$validators.min = function (value) {
+                    return ctrl.$isEmpty(value) || isUndefined(minVal) || value >= minVal;
+                };
+                attr.$observe('min', function (val) {
+                    if (isDefined(val) && !isNumber(val)) {
+                        val = parseFloat(val, 10);
+                    }
+                    minVal = isNumber(val) && !isNaN(val) ? val : undefined;
+                    ctrl.$validate();
+                });
+            }
+            if (isDefined(attr.max) || attr.ngMax) {
+                var maxVal;
+                ctrl.$validators.max = function (value) {
+                    return ctrl.$isEmpty(value) || isUndefined(maxVal) || value <= maxVal;
+                };
+                attr.$observe('max', function (val) {
+                    if (isDefined(val) && !isNumber(val)) {
+                        val = parseFloat(val, 10);
+                    }
+                    maxVal = isNumber(val) && !isNaN(val) ? val : undefined;
+                    ctrl.$validate();
+                });
+            }
         }
         function urlInputType(scope, element, attr, ctrl, $sniffer, $browser) {
-            textInputType(scope, element, attr, ctrl, $sniffer, $browser);
-            var urlValidator = function (value) {
-                if (ctrl.$isEmpty(value) || URL_REGEXP.test(value)) {
-                    ctrl.$setValidity('url', true);
-                    return value;
-                } else {
-                    ctrl.$setValidity('url', false);
-                    return undefined;
-                }
+            baseInputType(scope, element, attr, ctrl, $sniffer, $browser);
+            stringBasedInputType(ctrl);
+            ctrl.$$parserName = 'url';
+            ctrl.$validators.url = function (modelValue, viewValue) {
+                var value = modelValue || viewValue;
+                return ctrl.$isEmpty(value) || URL_REGEXP.test(value);
             };
-            ctrl.$formatters.push(urlValidator);
-            ctrl.$parsers.push(urlValidator);
         }
         function emailInputType(scope, element, attr, ctrl, $sniffer, $browser) {
-            textInputType(scope, element, attr, ctrl, $sniffer, $browser);
-            var emailValidator = function (value) {
-                if (ctrl.$isEmpty(value) || EMAIL_REGEXP.test(value)) {
-                    ctrl.$setValidity('email', true);
-                    return value;
-                } else {
-                    ctrl.$setValidity('email', false);
-                    return undefined;
-                }
+            baseInputType(scope, element, attr, ctrl, $sniffer, $browser);
+            stringBasedInputType(ctrl);
+            ctrl.$$parserName = 'email';
+            ctrl.$validators.email = function (modelValue, viewValue) {
+                var value = modelValue || viewValue;
+                return ctrl.$isEmpty(value) || EMAIL_REGEXP.test(value);
             };
-            ctrl.$formatters.push(emailValidator);
-            ctrl.$parsers.push(emailValidator);
         }
         function radioInputType(scope, element, attr, ctrl) {
             if (isUndefined(attr.name)) {
                 element.attr('name', nextUid());
             }
-            element.on('click', function () {
+            var listener = function (ev) {
                 if (element[0].checked) {
-                    scope.$apply(function () {
-                        ctrl.$setViewValue(attr.value);
-                    });
+                    ctrl.$setViewValue(attr.value, ev && ev.type);
                 }
-            });
+            };
+            element.on('click', listener);
             ctrl.$render = function () {
                 var value = attr.value;
                 element[0].checked = value == ctrl.$viewValue;
             };
             attr.$observe('value', ctrl.$render);
         }
-        function checkboxInputType(scope, element, attr, ctrl) {
-            var trueValue = attr.ngTrueValue, falseValue = attr.ngFalseValue;
-            if (!isString(trueValue))
-                trueValue = true;
-            if (!isString(falseValue))
-                falseValue = false;
-            element.on('click', function () {
-                scope.$apply(function () {
-                    ctrl.$setViewValue(element[0].checked);
-                });
-            });
+        function parseConstantExpr($parse, context, name, expression, fallback) {
+            var parseFn;
+            if (isDefined(expression)) {
+                parseFn = $parse(expression);
+                if (!parseFn.constant) {
+                    throw ngModelMinErr('constexpr', 'Expected constant expression for `{0}`, but saw ' + '`{1}`.', name, expression);
+                }
+                return parseFn(context);
+            }
+            return fallback;
+        }
+        function checkboxInputType(scope, element, attr, ctrl, $sniffer, $browser, $filter, $parse) {
+            var trueValue = parseConstantExpr($parse, scope, 'ngTrueValue', attr.ngTrueValue, true);
+            var falseValue = parseConstantExpr($parse, scope, 'ngFalseValue', attr.ngFalseValue, false);
+            var listener = function (ev) {
+                ctrl.$setViewValue(element[0].checked, ev && ev.type);
+            };
+            element.on('click', listener);
             ctrl.$render = function () {
                 element[0].checked = ctrl.$viewValue;
             };
             ctrl.$isEmpty = function (value) {
-                return value !== trueValue;
+                return value === false;
             };
             ctrl.$formatters.push(function (value) {
-                return value === trueValue;
+                return equals(value, trueValue);
             });
             ctrl.$parsers.push(function (value) {
                 return value ? trueValue : falseValue;
@@ -6644,198 +10108,26 @@ define('angular', [], function () {
         var inputDirective = [
             '$browser',
             '$sniffer',
-            function ($browser, $sniffer) {
+            '$filter',
+            '$parse',
+            function ($browser, $sniffer, $filter, $parse) {
                 return {
                     restrict: 'E',
-                    require: '?ngModel',
-                    link: function (scope, element, attr, ctrl) {
-                        if (ctrl) {
-                            (inputType[lowercase(attr.type)] || inputType.text)(scope, element, attr, ctrl, $sniffer, $browser);
-                        }
-                    }
-                };
-            }
-        ];
-        var VALID_CLASS = 'ng-valid', INVALID_CLASS = 'ng-invalid', PRISTINE_CLASS = 'ng-pristine', DIRTY_CLASS = 'ng-dirty';
-        var NgModelController = [
-            '$scope',
-            '$exceptionHandler',
-            '$attrs',
-            '$element',
-            '$parse',
-            function ($scope, $exceptionHandler, $attr, $element, $parse) {
-                this.$viewValue = Number.NaN;
-                this.$modelValue = Number.NaN;
-                this.$parsers = [];
-                this.$formatters = [];
-                this.$viewChangeListeners = [];
-                this.$pristine = true;
-                this.$dirty = false;
-                this.$valid = true;
-                this.$invalid = false;
-                this.$name = $attr.name;
-                var ngModelGet = $parse($attr.ngModel), ngModelSet = ngModelGet.assign;
-                if (!ngModelSet) {
-                    throw minErr('ngModel')('nonassign', 'Expression \'{0}\' is non-assignable. Element: {1}', $attr.ngModel, startingTag($element));
-                }
-                this.$render = noop;
-                this.$isEmpty = function (value) {
-                    return isUndefined(value) || value === '' || value === null || value !== value;
-                };
-                var parentForm = $element.inheritedData('$formController') || nullFormCtrl, invalidCount = 0, $error = this.$error = {};
-                $element.addClass(PRISTINE_CLASS);
-                toggleValidCss(true);
-                function toggleValidCss(isValid, validationErrorKey) {
-                    validationErrorKey = validationErrorKey ? '-' + snake_case(validationErrorKey, '-') : '';
-                    $element.removeClass((isValid ? INVALID_CLASS : VALID_CLASS) + validationErrorKey).addClass((isValid ? VALID_CLASS : INVALID_CLASS) + validationErrorKey);
-                }
-                this.$setValidity = function (validationErrorKey, isValid) {
-                    if ($error[validationErrorKey] === !isValid)
-                        return;
-                    if (isValid) {
-                        if ($error[validationErrorKey])
-                            invalidCount--;
-                        if (!invalidCount) {
-                            toggleValidCss(true);
-                            this.$valid = true;
-                            this.$invalid = false;
-                        }
-                    } else {
-                        toggleValidCss(false);
-                        this.$invalid = true;
-                        this.$valid = false;
-                        invalidCount++;
-                    }
-                    $error[validationErrorKey] = !isValid;
-                    toggleValidCss(isValid, validationErrorKey);
-                    parentForm.$setValidity(validationErrorKey, isValid, this);
-                };
-                this.$setPristine = function () {
-                    this.$dirty = false;
-                    this.$pristine = true;
-                    $element.removeClass(DIRTY_CLASS).addClass(PRISTINE_CLASS);
-                };
-                this.$setViewValue = function (value) {
-                    this.$viewValue = value;
-                    if (this.$pristine) {
-                        this.$dirty = true;
-                        this.$pristine = false;
-                        $element.removeClass(PRISTINE_CLASS).addClass(DIRTY_CLASS);
-                        parentForm.$setDirty();
-                    }
-                    forEach(this.$parsers, function (fn) {
-                        value = fn(value);
-                    });
-                    if (this.$modelValue !== value) {
-                        this.$modelValue = value;
-                        ngModelSet($scope, value);
-                        forEach(this.$viewChangeListeners, function (listener) {
-                            try {
-                                listener();
-                            } catch (e) {
-                                $exceptionHandler(e);
+                    require: ['?ngModel'],
+                    link: {
+                        pre: function (scope, element, attr, ctrls) {
+                            if (ctrls[0]) {
+                                (inputType[lowercase(attr.type)] || inputType.text)(scope, element, attr, ctrls[0], $sniffer, $browser, $filter, $parse);
                             }
-                        });
+                        }
                     }
                 };
-                var ctrl = this;
-                $scope.$watch(function ngModelWatch() {
-                    var value = ngModelGet($scope);
-                    if (ctrl.$modelValue !== value) {
-                        var formatters = ctrl.$formatters, idx = formatters.length;
-                        ctrl.$modelValue = value;
-                        while (idx--) {
-                            value = formatters[idx](value);
-                        }
-                        if (ctrl.$viewValue !== value) {
-                            ctrl.$viewValue = value;
-                            ctrl.$render();
-                        }
-                    }
-                });
             }
         ];
-        var ngModelDirective = function () {
-            return {
-                require: [
-                    'ngModel',
-                    '^?form'
-                ],
-                controller: NgModelController,
-                link: function (scope, element, attr, ctrls) {
-                    var modelCtrl = ctrls[0], formCtrl = ctrls[1] || nullFormCtrl;
-                    formCtrl.$addControl(modelCtrl);
-                    scope.$on('$destroy', function () {
-                        formCtrl.$removeControl(modelCtrl);
-                    });
-                }
-            };
-        };
-        var ngChangeDirective = valueFn({
-            require: 'ngModel',
-            link: function (scope, element, attr, ctrl) {
-                ctrl.$viewChangeListeners.push(function () {
-                    scope.$eval(attr.ngChange);
-                });
-            }
-        });
-        var requiredDirective = function () {
-            return {
-                require: '?ngModel',
-                link: function (scope, elm, attr, ctrl) {
-                    if (!ctrl)
-                        return;
-                    attr.required = true;
-                    var validator = function (value) {
-                        if (attr.required && ctrl.$isEmpty(value)) {
-                            ctrl.$setValidity('required', false);
-                            return;
-                        } else {
-                            ctrl.$setValidity('required', true);
-                            return value;
-                        }
-                    };
-                    ctrl.$formatters.push(validator);
-                    ctrl.$parsers.unshift(validator);
-                    attr.$observe('required', function () {
-                        validator(ctrl.$viewValue);
-                    });
-                }
-            };
-        };
-        var ngListDirective = function () {
-            return {
-                require: 'ngModel',
-                link: function (scope, element, attr, ctrl) {
-                    var match = /\/(.*)\//.exec(attr.ngList), separator = match && new RegExp(match[1]) || attr.ngList || ',';
-                    var parse = function (viewValue) {
-                        if (isUndefined(viewValue))
-                            return;
-                        var list = [];
-                        if (viewValue) {
-                            forEach(viewValue.split(separator), function (value) {
-                                if (value)
-                                    list.push(trim(value));
-                            });
-                        }
-                        return list;
-                    };
-                    ctrl.$parsers.push(parse);
-                    ctrl.$formatters.push(function (value) {
-                        if (isArray(value)) {
-                            return value.join(', ');
-                        }
-                        return undefined;
-                    });
-                    ctrl.$isEmpty = function (value) {
-                        return !value || !value.length;
-                    };
-                }
-            };
-        };
         var CONSTANT_VALUE_REGEXP = /^(true|false|\d+)$/;
         var ngValueDirective = function () {
             return {
+                restrict: 'A',
                 priority: 100,
                 compile: function (tpl, tplAttr) {
                     if (CONSTANT_VALUE_REGEXP.test(tplAttr.ngValue)) {
@@ -6852,88 +10144,185 @@ define('angular', [], function () {
                 }
             };
         };
-        var ngBindDirective = ngDirective(function (scope, element, attr) {
-            element.addClass('ng-binding').data('$binding', attr.ngBind);
-            scope.$watch(attr.ngBind, function ngBindWatchAction(value) {
-                element.text(value == undefined ? '' : value);
-            });
-        });
+        var ngBindDirective = [
+            '$compile',
+            function ($compile) {
+                return {
+                    restrict: 'AC',
+                    compile: function ngBindCompile(templateElement) {
+                        $compile.$$addBindingClass(templateElement);
+                        return function ngBindLink(scope, element, attr) {
+                            $compile.$$addBindingInfo(element, attr.ngBind);
+                            element = element[0];
+                            scope.$watch(attr.ngBind, function ngBindWatchAction(value) {
+                                element.textContent = isUndefined(value) ? '' : value;
+                            });
+                        };
+                    }
+                };
+            }
+        ];
         var ngBindTemplateDirective = [
             '$interpolate',
-            function ($interpolate) {
-                return function (scope, element, attr) {
-                    var interpolateFn = $interpolate(element.attr(attr.$attr.ngBindTemplate));
-                    element.addClass('ng-binding').data('$binding', interpolateFn);
-                    attr.$observe('ngBindTemplate', function (value) {
-                        element.text(value);
-                    });
+            '$compile',
+            function ($interpolate, $compile) {
+                return {
+                    compile: function ngBindTemplateCompile(templateElement) {
+                        $compile.$$addBindingClass(templateElement);
+                        return function ngBindTemplateLink(scope, element, attr) {
+                            var interpolateFn = $interpolate(element.attr(attr.$attr.ngBindTemplate));
+                            $compile.$$addBindingInfo(element, interpolateFn.expressions);
+                            element = element[0];
+                            attr.$observe('ngBindTemplate', function (value) {
+                                element.textContent = isUndefined(value) ? '' : value;
+                            });
+                        };
+                    }
                 };
             }
         ];
         var ngBindHtmlDirective = [
             '$sce',
             '$parse',
-            function ($sce, $parse) {
-                return function (scope, element, attr) {
-                    element.addClass('ng-binding').data('$binding', attr.ngBindHtml);
-                    var parsed = $parse(attr.ngBindHtml);
-                    function getStringValue() {
-                        return (parsed(scope) || '').toString();
+            '$compile',
+            function ($sce, $parse, $compile) {
+                return {
+                    restrict: 'A',
+                    compile: function ngBindHtmlCompile(tElement, tAttrs) {
+                        var ngBindHtmlGetter = $parse(tAttrs.ngBindHtml);
+                        var ngBindHtmlWatch = $parse(tAttrs.ngBindHtml, function getStringValue(value) {
+                            return (value || '').toString();
+                        });
+                        $compile.$$addBindingClass(tElement);
+                        return function ngBindHtmlLink(scope, element, attr) {
+                            $compile.$$addBindingInfo(element, attr.ngBindHtml);
+                            scope.$watch(ngBindHtmlWatch, function ngBindHtmlWatchAction() {
+                                element.html($sce.getTrustedHtml(ngBindHtmlGetter(scope)) || '');
+                            });
+                        };
                     }
-                    scope.$watch(getStringValue, function ngBindHtmlWatchAction(value) {
-                        element.html($sce.getTrustedHtml(parsed(scope)) || '');
-                    });
                 };
             }
         ];
+        var ngChangeDirective = valueFn({
+            restrict: 'A',
+            require: 'ngModel',
+            link: function (scope, element, attr, ctrl) {
+                ctrl.$viewChangeListeners.push(function () {
+                    scope.$eval(attr.ngChange);
+                });
+            }
+        });
         function classDirective(name, selector) {
             name = 'ngClass' + name;
-            return function () {
-                return {
-                    restrict: 'AC',
-                    link: function (scope, element, attr) {
-                        var oldVal;
-                        scope.$watch(attr[name], ngClassWatchAction, true);
-                        attr.$observe('class', function (value) {
-                            ngClassWatchAction(scope.$eval(attr[name]));
-                        });
-                        if (name !== 'ngClass') {
-                            scope.$watch('$index', function ($index, old$index) {
-                                var mod = $index & 1;
-                                if (mod !== old$index & 1) {
-                                    var classes = flattenClasses(scope.$eval(attr[name]));
-                                    mod === selector ? attr.$addClass(classes) : attr.$removeClass(classes);
-                                }
+            return [
+                '$animate',
+                function ($animate) {
+                    return {
+                        restrict: 'AC',
+                        link: function (scope, element, attr) {
+                            var oldVal;
+                            scope.$watch(attr[name], ngClassWatchAction, true);
+                            attr.$observe('class', function (value) {
+                                ngClassWatchAction(scope.$eval(attr[name]));
                             });
-                        }
-                        function ngClassWatchAction(newVal) {
-                            if (selector === true || scope.$index % 2 === selector) {
-                                var newClasses = flattenClasses(newVal || '');
-                                if (!oldVal) {
-                                    attr.$addClass(newClasses);
-                                } else if (!equals(newVal, oldVal)) {
-                                    attr.$updateClass(newClasses, flattenClasses(oldVal));
-                                }
-                            }
-                            oldVal = copy(newVal);
-                        }
-                        function flattenClasses(classVal) {
-                            if (isArray(classVal)) {
-                                return classVal.join(' ');
-                            } else if (isObject(classVal)) {
-                                var classes = [], i = 0;
-                                forEach(classVal, function (v, k) {
-                                    if (v) {
-                                        classes.push(k);
+                            if (name !== 'ngClass') {
+                                scope.$watch('$index', function ($index, old$index) {
+                                    var mod = $index & 1;
+                                    if (mod !== (old$index & 1)) {
+                                        var classes = arrayClasses(scope.$eval(attr[name]));
+                                        mod === selector ? addClasses(classes) : removeClasses(classes);
                                     }
                                 });
-                                return classes.join(' ');
                             }
-                            return classVal;
+                            function addClasses(classes) {
+                                var newClasses = digestClassCounts(classes, 1);
+                                attr.$addClass(newClasses);
+                            }
+                            function removeClasses(classes) {
+                                var newClasses = digestClassCounts(classes, -1);
+                                attr.$removeClass(newClasses);
+                            }
+                            function digestClassCounts(classes, count) {
+                                var classCounts = element.data('$classCounts') || createMap();
+                                var classesToUpdate = [];
+                                forEach(classes, function (className) {
+                                    if (count > 0 || classCounts[className]) {
+                                        classCounts[className] = (classCounts[className] || 0) + count;
+                                        if (classCounts[className] === +(count > 0)) {
+                                            classesToUpdate.push(className);
+                                        }
+                                    }
+                                });
+                                element.data('$classCounts', classCounts);
+                                return classesToUpdate.join(' ');
+                            }
+                            function updateClasses(oldClasses, newClasses) {
+                                var toAdd = arrayDifference(newClasses, oldClasses);
+                                var toRemove = arrayDifference(oldClasses, newClasses);
+                                toAdd = digestClassCounts(toAdd, 1);
+                                toRemove = digestClassCounts(toRemove, -1);
+                                if (toAdd && toAdd.length) {
+                                    $animate.addClass(element, toAdd);
+                                }
+                                if (toRemove && toRemove.length) {
+                                    $animate.removeClass(element, toRemove);
+                                }
+                            }
+                            function ngClassWatchAction(newVal) {
+                                if (selector === true || scope.$index % 2 === selector) {
+                                    var newClasses = arrayClasses(newVal || []);
+                                    if (!oldVal) {
+                                        addClasses(newClasses);
+                                    } else if (!equals(newVal, oldVal)) {
+                                        var oldClasses = arrayClasses(oldVal);
+                                        updateClasses(oldClasses, newClasses);
+                                    }
+                                }
+                                if (isArray(newVal)) {
+                                    oldVal = newVal.map(function (v) {
+                                        return shallowCopy(v);
+                                    });
+                                } else {
+                                    oldVal = shallowCopy(newVal);
+                                }
+                            }
                         }
+                    };
+                    function arrayDifference(tokens1, tokens2) {
+                        var values = [];
+                        outer:
+                            for (var i = 0; i < tokens1.length; i++) {
+                                var token = tokens1[i];
+                                for (var j = 0; j < tokens2.length; j++) {
+                                    if (token == tokens2[j])
+                                        continue outer;
+                                }
+                                values.push(token);
+                            }
+                        return values;
                     }
-                };
-            };
+                    function arrayClasses(classVal) {
+                        var classes = [];
+                        if (isArray(classVal)) {
+                            forEach(classVal, function (v) {
+                                classes = classes.concat(arrayClasses(v));
+                            });
+                            return classes;
+                        } else if (isString(classVal)) {
+                            return classVal.split(' ');
+                        } else if (isObject(classVal)) {
+                            forEach(classVal, function (v, k) {
+                                if (v) {
+                                    classes = classes.concat(k.split(' '));
+                                }
+                            });
+                            return classes;
+                        }
+                        return classVal;
+                    }
+                }
+            ];
         }
         var ngClassDirective = classDirective('', true);
         var ngClassOddDirective = classDirective('Odd', 0);
@@ -6946,25 +10335,37 @@ define('angular', [], function () {
         });
         var ngControllerDirective = [function () {
                 return {
+                    restrict: 'A',
                     scope: true,
                     controller: '@',
                     priority: 500
                 };
             }];
         var ngEventDirectives = {};
-        forEach('click dblclick mousedown mouseup mouseover mouseout mousemove mouseenter mouseleave keydown keyup keypress submit focus blur copy cut paste'.split(' '), function (name) {
-            var directiveName = directiveNormalize('ng-' + name);
+        var forceAsyncEvents = {
+            'blur': true,
+            'focus': true
+        };
+        forEach('click dblclick mousedown mouseup mouseover mouseout mousemove mouseenter mouseleave keydown keyup keypress submit focus blur copy cut paste'.split(' '), function (eventName) {
+            var directiveName = directiveNormalize('ng-' + eventName);
             ngEventDirectives[directiveName] = [
                 '$parse',
-                function ($parse) {
+                '$rootScope',
+                function ($parse, $rootScope) {
                     return {
+                        restrict: 'A',
                         compile: function ($element, attr) {
-                            var fn = $parse(attr[directiveName]);
-                            return function (scope, element, attr) {
-                                element.on(lowercase(name), function (event) {
-                                    scope.$apply(function () {
+                            var fn = $parse(attr[directiveName], null, true);
+                            return function ngEventHandler(scope, element) {
+                                element.on(eventName, function (event) {
+                                    var callback = function () {
                                         fn(scope, { $event: event });
-                                    });
+                                    };
+                                    if (forceAsyncEvents[eventName] && $rootScope.$$phase) {
+                                        scope.$evalAsync(callback);
+                                    } else {
+                                        scope.$apply(callback);
+                                    }
                                 });
                             };
                         }
@@ -6974,34 +10375,41 @@ define('angular', [], function () {
         });
         var ngIfDirective = [
             '$animate',
-            function ($animate) {
+            '$compile',
+            function ($animate, $compile) {
                 return {
+                    multiElement: true,
                     transclude: 'element',
                     priority: 600,
                     terminal: true,
                     restrict: 'A',
                     $$tlb: true,
                     link: function ($scope, $element, $attr, ctrl, $transclude) {
-                        var block, childScope;
+                        var block, childScope, previousElements;
                         $scope.$watch($attr.ngIf, function ngIfWatchAction(value) {
-                            if (toBoolean(value)) {
+                            if (value) {
                                 if (!childScope) {
-                                    childScope = $scope.$new();
-                                    $transclude(childScope, function (clone) {
-                                        block = {
-                                            startNode: clone[0],
-                                            endNode: clone[clone.length++] = document.createComment(' end ngIf: ' + $attr.ngIf + ' ')
-                                        };
+                                    $transclude(function (clone, newScope) {
+                                        childScope = newScope;
+                                        clone[clone.length++] = $compile.$$createComment('end ngIf', $attr.ngIf);
+                                        block = { clone: clone };
                                         $animate.enter(clone, $element.parent(), $element);
                                     });
                                 }
                             } else {
+                                if (previousElements) {
+                                    previousElements.remove();
+                                    previousElements = null;
+                                }
                                 if (childScope) {
                                     childScope.$destroy();
                                     childScope = null;
                                 }
                                 if (block) {
-                                    $animate.leave(getBlockElements(block));
+                                    previousElements = getBlockNodes(block.clone);
+                                    $animate.leave(previousElements).then(function () {
+                                        previousElements = null;
+                                    });
                                     block = null;
                                 }
                             }
@@ -7011,33 +10419,38 @@ define('angular', [], function () {
             }
         ];
         var ngIncludeDirective = [
-            '$http',
-            '$templateCache',
+            '$templateRequest',
             '$anchorScroll',
-            '$compile',
             '$animate',
-            '$sce',
-            function ($http, $templateCache, $anchorScroll, $compile, $animate, $sce) {
+            function ($templateRequest, $anchorScroll, $animate) {
                 return {
                     restrict: 'ECA',
                     priority: 400,
                     terminal: true,
                     transclude: 'element',
+                    controller: angular.noop,
                     compile: function (element, attr) {
                         var srcExp = attr.ngInclude || attr.src, onloadExp = attr.onload || '', autoScrollExp = attr.autoscroll;
                         return function (scope, $element, $attr, ctrl, $transclude) {
-                            var changeCounter = 0, currentScope, currentElement;
+                            var changeCounter = 0, currentScope, previousElement, currentElement;
                             var cleanupLastIncludeContent = function () {
+                                if (previousElement) {
+                                    previousElement.remove();
+                                    previousElement = null;
+                                }
                                 if (currentScope) {
                                     currentScope.$destroy();
                                     currentScope = null;
                                 }
                                 if (currentElement) {
-                                    $animate.leave(currentElement);
+                                    $animate.leave(currentElement).then(function () {
+                                        previousElement = null;
+                                    });
+                                    previousElement = currentElement;
                                     currentElement = null;
                                 }
                             };
-                            scope.$watch($sce.parseAsResourceUrl(srcExp), function ngIncludeWatchAction(src) {
+                            scope.$watch(srcExp, function ngIncludeWatchAction(src) {
                                 var afterAnimation = function () {
                                     if (isDefined(autoScrollExp) && (!autoScrollExp || scope.$eval(autoScrollExp))) {
                                         $anchorScroll();
@@ -7045,26 +10458,33 @@ define('angular', [], function () {
                                 };
                                 var thisChangeId = ++changeCounter;
                                 if (src) {
-                                    $http.get(src, { cache: $templateCache }).success(function (response) {
+                                    $templateRequest(src, true).then(function (response) {
+                                        if (scope.$$destroyed)
+                                            return;
                                         if (thisChangeId !== changeCounter)
                                             return;
                                         var newScope = scope.$new();
-                                        var clone = $transclude(newScope, noop);
-                                        cleanupLastIncludeContent();
+                                        ctrl.template = response;
+                                        var clone = $transclude(newScope, function (clone) {
+                                            cleanupLastIncludeContent();
+                                            $animate.enter(clone, null, $element).then(afterAnimation);
+                                        });
                                         currentScope = newScope;
                                         currentElement = clone;
-                                        currentElement.html(response);
-                                        $animate.enter(currentElement, null, $element, afterAnimation);
-                                        $compile(currentElement.contents())(currentScope);
-                                        currentScope.$emit('$includeContentLoaded');
+                                        currentScope.$emit('$includeContentLoaded', src);
                                         scope.$eval(onloadExp);
-                                    }).error(function () {
-                                        if (thisChangeId === changeCounter)
+                                    }, function () {
+                                        if (scope.$$destroyed)
+                                            return;
+                                        if (thisChangeId === changeCounter) {
                                             cleanupLastIncludeContent();
+                                            scope.$emit('$includeContentError', src);
+                                        }
                                     });
-                                    scope.$emit('$includeContentRequested');
+                                    scope.$emit('$includeContentRequested', src);
                                 } else {
                                     cleanupLastIncludeContent();
+                                    ctrl.template = null;
                                 }
                             });
                         };
@@ -7072,7 +10492,29 @@ define('angular', [], function () {
                 };
             }
         ];
+        var ngIncludeFillContentDirective = [
+            '$compile',
+            function ($compile) {
+                return {
+                    restrict: 'ECA',
+                    priority: -400,
+                    require: 'ngInclude',
+                    link: function (scope, $element, $attr, ctrl) {
+                        if (toString.call($element[0]).match(/SVG/)) {
+                            $element.empty();
+                            $compile(jqLiteBuildFragment(ctrl.template, window.document).childNodes)(scope, function namespaceAdaptedClone(clone) {
+                                $element.append(clone);
+                            }, { futureParentElement: $element });
+                            return;
+                        }
+                        $element.html(ctrl.template);
+                        $compile($element.contents())(scope);
+                    }
+                };
+            }
+        ];
         var ngInitDirective = ngDirective({
+            priority: 450,
             compile: function () {
                 return {
                     pre: function (scope, element, attrs) {
@@ -7081,39 +10523,879 @@ define('angular', [], function () {
                 };
             }
         });
+        var ngListDirective = function () {
+            return {
+                restrict: 'A',
+                priority: 100,
+                require: 'ngModel',
+                link: function (scope, element, attr, ctrl) {
+                    var ngList = element.attr(attr.$attr.ngList) || ', ';
+                    var trimValues = attr.ngTrim !== 'false';
+                    var separator = trimValues ? trim(ngList) : ngList;
+                    var parse = function (viewValue) {
+                        if (isUndefined(viewValue))
+                            return;
+                        var list = [];
+                        if (viewValue) {
+                            forEach(viewValue.split(separator), function (value) {
+                                if (value)
+                                    list.push(trimValues ? trim(value) : value);
+                            });
+                        }
+                        return list;
+                    };
+                    ctrl.$parsers.push(parse);
+                    ctrl.$formatters.push(function (value) {
+                        if (isArray(value)) {
+                            return value.join(ngList);
+                        }
+                        return undefined;
+                    });
+                    ctrl.$isEmpty = function (value) {
+                        return !value || !value.length;
+                    };
+                }
+            };
+        };
+        var VALID_CLASS = 'ng-valid', INVALID_CLASS = 'ng-invalid', PRISTINE_CLASS = 'ng-pristine', DIRTY_CLASS = 'ng-dirty', UNTOUCHED_CLASS = 'ng-untouched', TOUCHED_CLASS = 'ng-touched', PENDING_CLASS = 'ng-pending', EMPTY_CLASS = 'ng-empty', NOT_EMPTY_CLASS = 'ng-not-empty';
+        var ngModelMinErr = minErr('ngModel');
+        var NgModelController = [
+            '$scope',
+            '$exceptionHandler',
+            '$attrs',
+            '$element',
+            '$parse',
+            '$animate',
+            '$timeout',
+            '$rootScope',
+            '$q',
+            '$interpolate',
+            function ($scope, $exceptionHandler, $attr, $element, $parse, $animate, $timeout, $rootScope, $q, $interpolate) {
+                this.$viewValue = Number.NaN;
+                this.$modelValue = Number.NaN;
+                this.$$rawModelValue = undefined;
+                this.$validators = {};
+                this.$asyncValidators = {};
+                this.$parsers = [];
+                this.$formatters = [];
+                this.$viewChangeListeners = [];
+                this.$untouched = true;
+                this.$touched = false;
+                this.$pristine = true;
+                this.$dirty = false;
+                this.$valid = true;
+                this.$invalid = false;
+                this.$error = {};
+                this.$$success = {};
+                this.$pending = undefined;
+                this.$name = $interpolate($attr.name || '', false)($scope);
+                this.$$parentForm = nullFormCtrl;
+                var parsedNgModel = $parse($attr.ngModel), parsedNgModelAssign = parsedNgModel.assign, ngModelGet = parsedNgModel, ngModelSet = parsedNgModelAssign, pendingDebounce = null, parserValid, ctrl = this;
+                this.$$setOptions = function (options) {
+                    ctrl.$options = options;
+                    if (options && options.getterSetter) {
+                        var invokeModelGetter = $parse($attr.ngModel + '()'), invokeModelSetter = $parse($attr.ngModel + '($$$p)');
+                        ngModelGet = function ($scope) {
+                            var modelValue = parsedNgModel($scope);
+                            if (isFunction(modelValue)) {
+                                modelValue = invokeModelGetter($scope);
+                            }
+                            return modelValue;
+                        };
+                        ngModelSet = function ($scope, newValue) {
+                            if (isFunction(parsedNgModel($scope))) {
+                                invokeModelSetter($scope, { $$$p: newValue });
+                            } else {
+                                parsedNgModelAssign($scope, newValue);
+                            }
+                        };
+                    } else if (!parsedNgModel.assign) {
+                        throw ngModelMinErr('nonassign', 'Expression \'{0}\' is non-assignable. Element: {1}', $attr.ngModel, startingTag($element));
+                    }
+                };
+                this.$render = noop;
+                this.$isEmpty = function (value) {
+                    return isUndefined(value) || value === '' || value === null || value !== value;
+                };
+                this.$$updateEmptyClasses = function (value) {
+                    if (ctrl.$isEmpty(value)) {
+                        $animate.removeClass($element, NOT_EMPTY_CLASS);
+                        $animate.addClass($element, EMPTY_CLASS);
+                    } else {
+                        $animate.removeClass($element, EMPTY_CLASS);
+                        $animate.addClass($element, NOT_EMPTY_CLASS);
+                    }
+                };
+                var currentValidationRunId = 0;
+                addSetValidityMethod({
+                    ctrl: this,
+                    $element: $element,
+                    set: function (object, property) {
+                        object[property] = true;
+                    },
+                    unset: function (object, property) {
+                        delete object[property];
+                    },
+                    $animate: $animate
+                });
+                this.$setPristine = function () {
+                    ctrl.$dirty = false;
+                    ctrl.$pristine = true;
+                    $animate.removeClass($element, DIRTY_CLASS);
+                    $animate.addClass($element, PRISTINE_CLASS);
+                };
+                this.$setDirty = function () {
+                    ctrl.$dirty = true;
+                    ctrl.$pristine = false;
+                    $animate.removeClass($element, PRISTINE_CLASS);
+                    $animate.addClass($element, DIRTY_CLASS);
+                    ctrl.$$parentForm.$setDirty();
+                };
+                this.$setUntouched = function () {
+                    ctrl.$touched = false;
+                    ctrl.$untouched = true;
+                    $animate.setClass($element, UNTOUCHED_CLASS, TOUCHED_CLASS);
+                };
+                this.$setTouched = function () {
+                    ctrl.$touched = true;
+                    ctrl.$untouched = false;
+                    $animate.setClass($element, TOUCHED_CLASS, UNTOUCHED_CLASS);
+                };
+                this.$rollbackViewValue = function () {
+                    $timeout.cancel(pendingDebounce);
+                    ctrl.$viewValue = ctrl.$$lastCommittedViewValue;
+                    ctrl.$render();
+                };
+                this.$validate = function () {
+                    if (isNumber(ctrl.$modelValue) && isNaN(ctrl.$modelValue)) {
+                        return;
+                    }
+                    var viewValue = ctrl.$$lastCommittedViewValue;
+                    var modelValue = ctrl.$$rawModelValue;
+                    var prevValid = ctrl.$valid;
+                    var prevModelValue = ctrl.$modelValue;
+                    var allowInvalid = ctrl.$options && ctrl.$options.allowInvalid;
+                    ctrl.$$runValidators(modelValue, viewValue, function (allValid) {
+                        if (!allowInvalid && prevValid !== allValid) {
+                            ctrl.$modelValue = allValid ? modelValue : undefined;
+                            if (ctrl.$modelValue !== prevModelValue) {
+                                ctrl.$$writeModelToScope();
+                            }
+                        }
+                    });
+                };
+                this.$$runValidators = function (modelValue, viewValue, doneCallback) {
+                    currentValidationRunId++;
+                    var localValidationRunId = currentValidationRunId;
+                    if (!processParseErrors()) {
+                        validationDone(false);
+                        return;
+                    }
+                    if (!processSyncValidators()) {
+                        validationDone(false);
+                        return;
+                    }
+                    processAsyncValidators();
+                    function processParseErrors() {
+                        var errorKey = ctrl.$$parserName || 'parse';
+                        if (isUndefined(parserValid)) {
+                            setValidity(errorKey, null);
+                        } else {
+                            if (!parserValid) {
+                                forEach(ctrl.$validators, function (v, name) {
+                                    setValidity(name, null);
+                                });
+                                forEach(ctrl.$asyncValidators, function (v, name) {
+                                    setValidity(name, null);
+                                });
+                            }
+                            setValidity(errorKey, parserValid);
+                            return parserValid;
+                        }
+                        return true;
+                    }
+                    function processSyncValidators() {
+                        var syncValidatorsValid = true;
+                        forEach(ctrl.$validators, function (validator, name) {
+                            var result = validator(modelValue, viewValue);
+                            syncValidatorsValid = syncValidatorsValid && result;
+                            setValidity(name, result);
+                        });
+                        if (!syncValidatorsValid) {
+                            forEach(ctrl.$asyncValidators, function (v, name) {
+                                setValidity(name, null);
+                            });
+                            return false;
+                        }
+                        return true;
+                    }
+                    function processAsyncValidators() {
+                        var validatorPromises = [];
+                        var allValid = true;
+                        forEach(ctrl.$asyncValidators, function (validator, name) {
+                            var promise = validator(modelValue, viewValue);
+                            if (!isPromiseLike(promise)) {
+                                throw ngModelMinErr('nopromise', 'Expected asynchronous validator to return a promise but got \'{0}\' instead.', promise);
+                            }
+                            setValidity(name, undefined);
+                            validatorPromises.push(promise.then(function () {
+                                setValidity(name, true);
+                            }, function () {
+                                allValid = false;
+                                setValidity(name, false);
+                            }));
+                        });
+                        if (!validatorPromises.length) {
+                            validationDone(true);
+                        } else {
+                            $q.all(validatorPromises).then(function () {
+                                validationDone(allValid);
+                            }, noop);
+                        }
+                    }
+                    function setValidity(name, isValid) {
+                        if (localValidationRunId === currentValidationRunId) {
+                            ctrl.$setValidity(name, isValid);
+                        }
+                    }
+                    function validationDone(allValid) {
+                        if (localValidationRunId === currentValidationRunId) {
+                            doneCallback(allValid);
+                        }
+                    }
+                };
+                this.$commitViewValue = function () {
+                    var viewValue = ctrl.$viewValue;
+                    $timeout.cancel(pendingDebounce);
+                    if (ctrl.$$lastCommittedViewValue === viewValue && (viewValue !== '' || !ctrl.$$hasNativeValidators)) {
+                        return;
+                    }
+                    ctrl.$$updateEmptyClasses(viewValue);
+                    ctrl.$$lastCommittedViewValue = viewValue;
+                    if (ctrl.$pristine) {
+                        this.$setDirty();
+                    }
+                    this.$$parseAndValidate();
+                };
+                this.$$parseAndValidate = function () {
+                    var viewValue = ctrl.$$lastCommittedViewValue;
+                    var modelValue = viewValue;
+                    parserValid = isUndefined(modelValue) ? undefined : true;
+                    if (parserValid) {
+                        for (var i = 0; i < ctrl.$parsers.length; i++) {
+                            modelValue = ctrl.$parsers[i](modelValue);
+                            if (isUndefined(modelValue)) {
+                                parserValid = false;
+                                break;
+                            }
+                        }
+                    }
+                    if (isNumber(ctrl.$modelValue) && isNaN(ctrl.$modelValue)) {
+                        ctrl.$modelValue = ngModelGet($scope);
+                    }
+                    var prevModelValue = ctrl.$modelValue;
+                    var allowInvalid = ctrl.$options && ctrl.$options.allowInvalid;
+                    ctrl.$$rawModelValue = modelValue;
+                    if (allowInvalid) {
+                        ctrl.$modelValue = modelValue;
+                        writeToModelIfNeeded();
+                    }
+                    ctrl.$$runValidators(modelValue, ctrl.$$lastCommittedViewValue, function (allValid) {
+                        if (!allowInvalid) {
+                            ctrl.$modelValue = allValid ? modelValue : undefined;
+                            writeToModelIfNeeded();
+                        }
+                    });
+                    function writeToModelIfNeeded() {
+                        if (ctrl.$modelValue !== prevModelValue) {
+                            ctrl.$$writeModelToScope();
+                        }
+                    }
+                };
+                this.$$writeModelToScope = function () {
+                    ngModelSet($scope, ctrl.$modelValue);
+                    forEach(ctrl.$viewChangeListeners, function (listener) {
+                        try {
+                            listener();
+                        } catch (e) {
+                            $exceptionHandler(e);
+                        }
+                    });
+                };
+                this.$setViewValue = function (value, trigger) {
+                    ctrl.$viewValue = value;
+                    if (!ctrl.$options || ctrl.$options.updateOnDefault) {
+                        ctrl.$$debounceViewValueCommit(trigger);
+                    }
+                };
+                this.$$debounceViewValueCommit = function (trigger) {
+                    var debounceDelay = 0, options = ctrl.$options, debounce;
+                    if (options && isDefined(options.debounce)) {
+                        debounce = options.debounce;
+                        if (isNumber(debounce)) {
+                            debounceDelay = debounce;
+                        } else if (isNumber(debounce[trigger])) {
+                            debounceDelay = debounce[trigger];
+                        } else if (isNumber(debounce['default'])) {
+                            debounceDelay = debounce['default'];
+                        }
+                    }
+                    $timeout.cancel(pendingDebounce);
+                    if (debounceDelay) {
+                        pendingDebounce = $timeout(function () {
+                            ctrl.$commitViewValue();
+                        }, debounceDelay);
+                    } else if ($rootScope.$$phase) {
+                        ctrl.$commitViewValue();
+                    } else {
+                        $scope.$apply(function () {
+                            ctrl.$commitViewValue();
+                        });
+                    }
+                };
+                $scope.$watch(function ngModelWatch() {
+                    var modelValue = ngModelGet($scope);
+                    if (modelValue !== ctrl.$modelValue && (ctrl.$modelValue === ctrl.$modelValue || modelValue === modelValue)) {
+                        ctrl.$modelValue = ctrl.$$rawModelValue = modelValue;
+                        parserValid = undefined;
+                        var formatters = ctrl.$formatters, idx = formatters.length;
+                        var viewValue = modelValue;
+                        while (idx--) {
+                            viewValue = formatters[idx](viewValue);
+                        }
+                        if (ctrl.$viewValue !== viewValue) {
+                            ctrl.$$updateEmptyClasses(viewValue);
+                            ctrl.$viewValue = ctrl.$$lastCommittedViewValue = viewValue;
+                            ctrl.$render();
+                            ctrl.$$runValidators(modelValue, viewValue, noop);
+                        }
+                    }
+                    return modelValue;
+                });
+            }
+        ];
+        var ngModelDirective = [
+            '$rootScope',
+            function ($rootScope) {
+                return {
+                    restrict: 'A',
+                    require: [
+                        'ngModel',
+                        '^?form',
+                        '^?ngModelOptions'
+                    ],
+                    controller: NgModelController,
+                    priority: 1,
+                    compile: function ngModelCompile(element) {
+                        element.addClass(PRISTINE_CLASS).addClass(UNTOUCHED_CLASS).addClass(VALID_CLASS);
+                        return {
+                            pre: function ngModelPreLink(scope, element, attr, ctrls) {
+                                var modelCtrl = ctrls[0], formCtrl = ctrls[1] || modelCtrl.$$parentForm;
+                                modelCtrl.$$setOptions(ctrls[2] && ctrls[2].$options);
+                                formCtrl.$addControl(modelCtrl);
+                                attr.$observe('name', function (newValue) {
+                                    if (modelCtrl.$name !== newValue) {
+                                        modelCtrl.$$parentForm.$$renameControl(modelCtrl, newValue);
+                                    }
+                                });
+                                scope.$on('$destroy', function () {
+                                    modelCtrl.$$parentForm.$removeControl(modelCtrl);
+                                });
+                            },
+                            post: function ngModelPostLink(scope, element, attr, ctrls) {
+                                var modelCtrl = ctrls[0];
+                                if (modelCtrl.$options && modelCtrl.$options.updateOn) {
+                                    element.on(modelCtrl.$options.updateOn, function (ev) {
+                                        modelCtrl.$$debounceViewValueCommit(ev && ev.type);
+                                    });
+                                }
+                                element.on('blur', function () {
+                                    if (modelCtrl.$touched)
+                                        return;
+                                    if ($rootScope.$$phase) {
+                                        scope.$evalAsync(modelCtrl.$setTouched);
+                                    } else {
+                                        scope.$apply(modelCtrl.$setTouched);
+                                    }
+                                });
+                            }
+                        };
+                    }
+                };
+            }
+        ];
+        var DEFAULT_REGEXP = /(\s+|^)default(\s+|$)/;
+        var ngModelOptionsDirective = function () {
+            return {
+                restrict: 'A',
+                controller: [
+                    '$scope',
+                    '$attrs',
+                    function ($scope, $attrs) {
+                        var that = this;
+                        this.$options = copy($scope.$eval($attrs.ngModelOptions));
+                        if (isDefined(this.$options.updateOn)) {
+                            this.$options.updateOnDefault = false;
+                            this.$options.updateOn = trim(this.$options.updateOn.replace(DEFAULT_REGEXP, function () {
+                                that.$options.updateOnDefault = true;
+                                return ' ';
+                            }));
+                        } else {
+                            this.$options.updateOnDefault = true;
+                        }
+                    }
+                ]
+            };
+        };
+        function addSetValidityMethod(context) {
+            var ctrl = context.ctrl, $element = context.$element, classCache = {}, set = context.set, unset = context.unset, $animate = context.$animate;
+            classCache[INVALID_CLASS] = !(classCache[VALID_CLASS] = $element.hasClass(VALID_CLASS));
+            ctrl.$setValidity = setValidity;
+            function setValidity(validationErrorKey, state, controller) {
+                if (isUndefined(state)) {
+                    createAndSet('$pending', validationErrorKey, controller);
+                } else {
+                    unsetAndCleanup('$pending', validationErrorKey, controller);
+                }
+                if (!isBoolean(state)) {
+                    unset(ctrl.$error, validationErrorKey, controller);
+                    unset(ctrl.$$success, validationErrorKey, controller);
+                } else {
+                    if (state) {
+                        unset(ctrl.$error, validationErrorKey, controller);
+                        set(ctrl.$$success, validationErrorKey, controller);
+                    } else {
+                        set(ctrl.$error, validationErrorKey, controller);
+                        unset(ctrl.$$success, validationErrorKey, controller);
+                    }
+                }
+                if (ctrl.$pending) {
+                    cachedToggleClass(PENDING_CLASS, true);
+                    ctrl.$valid = ctrl.$invalid = undefined;
+                    toggleValidationCss('', null);
+                } else {
+                    cachedToggleClass(PENDING_CLASS, false);
+                    ctrl.$valid = isObjectEmpty(ctrl.$error);
+                    ctrl.$invalid = !ctrl.$valid;
+                    toggleValidationCss('', ctrl.$valid);
+                }
+                var combinedState;
+                if (ctrl.$pending && ctrl.$pending[validationErrorKey]) {
+                    combinedState = undefined;
+                } else if (ctrl.$error[validationErrorKey]) {
+                    combinedState = false;
+                } else if (ctrl.$$success[validationErrorKey]) {
+                    combinedState = true;
+                } else {
+                    combinedState = null;
+                }
+                toggleValidationCss(validationErrorKey, combinedState);
+                ctrl.$$parentForm.$setValidity(validationErrorKey, combinedState, ctrl);
+            }
+            function createAndSet(name, value, controller) {
+                if (!ctrl[name]) {
+                    ctrl[name] = {};
+                }
+                set(ctrl[name], value, controller);
+            }
+            function unsetAndCleanup(name, value, controller) {
+                if (ctrl[name]) {
+                    unset(ctrl[name], value, controller);
+                }
+                if (isObjectEmpty(ctrl[name])) {
+                    ctrl[name] = undefined;
+                }
+            }
+            function cachedToggleClass(className, switchValue) {
+                if (switchValue && !classCache[className]) {
+                    $animate.addClass($element, className);
+                    classCache[className] = true;
+                } else if (!switchValue && classCache[className]) {
+                    $animate.removeClass($element, className);
+                    classCache[className] = false;
+                }
+            }
+            function toggleValidationCss(validationErrorKey, isValid) {
+                validationErrorKey = validationErrorKey ? '-' + snake_case(validationErrorKey, '-') : '';
+                cachedToggleClass(VALID_CLASS + validationErrorKey, isValid === true);
+                cachedToggleClass(INVALID_CLASS + validationErrorKey, isValid === false);
+            }
+        }
+        function isObjectEmpty(obj) {
+            if (obj) {
+                for (var prop in obj) {
+                    if (obj.hasOwnProperty(prop)) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
         var ngNonBindableDirective = ngDirective({
             terminal: true,
             priority: 1000
         });
+        var ngOptionsMinErr = minErr('ngOptions');
+        var NG_OPTIONS_REGEXP = /^\s*([\s\S]+?)(?:\s+as\s+([\s\S]+?))?(?:\s+group\s+by\s+([\s\S]+?))?(?:\s+disable\s+when\s+([\s\S]+?))?\s+for\s+(?:([\$\w][\$\w]*)|(?:\(\s*([\$\w][\$\w]*)\s*,\s*([\$\w][\$\w]*)\s*\)))\s+in\s+([\s\S]+?)(?:\s+track\s+by\s+([\s\S]+?))?$/;
+        var ngOptionsDirective = [
+            '$compile',
+            '$document',
+            '$parse',
+            function ($compile, $document, $parse) {
+                function parseOptionsExpression(optionsExp, selectElement, scope) {
+                    var match = optionsExp.match(NG_OPTIONS_REGEXP);
+                    if (!match) {
+                        throw ngOptionsMinErr('iexp', 'Expected expression in form of ' + '\'_select_ (as _label_)? for (_key_,)?_value_ in _collection_\'' + ' but got \'{0}\'. Element: {1}', optionsExp, startingTag(selectElement));
+                    }
+                    var valueName = match[5] || match[7];
+                    var keyName = match[6];
+                    var selectAs = / as /.test(match[0]) && match[1];
+                    var trackBy = match[9];
+                    var valueFn = $parse(match[2] ? match[1] : valueName);
+                    var selectAsFn = selectAs && $parse(selectAs);
+                    var viewValueFn = selectAsFn || valueFn;
+                    var trackByFn = trackBy && $parse(trackBy);
+                    var getTrackByValueFn = trackBy ? function (value, locals) {
+                        return trackByFn(scope, locals);
+                    } : function getHashOfValue(value) {
+                        return hashKey(value);
+                    };
+                    var getTrackByValue = function (value, key) {
+                        return getTrackByValueFn(value, getLocals(value, key));
+                    };
+                    var displayFn = $parse(match[2] || match[1]);
+                    var groupByFn = $parse(match[3] || '');
+                    var disableWhenFn = $parse(match[4] || '');
+                    var valuesFn = $parse(match[8]);
+                    var locals = {};
+                    var getLocals = keyName ? function (value, key) {
+                        locals[keyName] = key;
+                        locals[valueName] = value;
+                        return locals;
+                    } : function (value) {
+                        locals[valueName] = value;
+                        return locals;
+                    };
+                    function Option(selectValue, viewValue, label, group, disabled) {
+                        this.selectValue = selectValue;
+                        this.viewValue = viewValue;
+                        this.label = label;
+                        this.group = group;
+                        this.disabled = disabled;
+                    }
+                    function getOptionValuesKeys(optionValues) {
+                        var optionValuesKeys;
+                        if (!keyName && isArrayLike(optionValues)) {
+                            optionValuesKeys = optionValues;
+                        } else {
+                            optionValuesKeys = [];
+                            for (var itemKey in optionValues) {
+                                if (optionValues.hasOwnProperty(itemKey) && itemKey.charAt(0) !== '$') {
+                                    optionValuesKeys.push(itemKey);
+                                }
+                            }
+                        }
+                        return optionValuesKeys;
+                    }
+                    return {
+                        trackBy: trackBy,
+                        getTrackByValue: getTrackByValue,
+                        getWatchables: $parse(valuesFn, function (optionValues) {
+                            var watchedArray = [];
+                            optionValues = optionValues || [];
+                            var optionValuesKeys = getOptionValuesKeys(optionValues);
+                            var optionValuesLength = optionValuesKeys.length;
+                            for (var index = 0; index < optionValuesLength; index++) {
+                                var key = optionValues === optionValuesKeys ? index : optionValuesKeys[index];
+                                var value = optionValues[key];
+                                var locals = getLocals(value, key);
+                                var selectValue = getTrackByValueFn(value, locals);
+                                watchedArray.push(selectValue);
+                                if (match[2] || match[1]) {
+                                    var label = displayFn(scope, locals);
+                                    watchedArray.push(label);
+                                }
+                                if (match[4]) {
+                                    var disableWhen = disableWhenFn(scope, locals);
+                                    watchedArray.push(disableWhen);
+                                }
+                            }
+                            return watchedArray;
+                        }),
+                        getOptions: function () {
+                            var optionItems = [];
+                            var selectValueMap = {};
+                            var optionValues = valuesFn(scope) || [];
+                            var optionValuesKeys = getOptionValuesKeys(optionValues);
+                            var optionValuesLength = optionValuesKeys.length;
+                            for (var index = 0; index < optionValuesLength; index++) {
+                                var key = optionValues === optionValuesKeys ? index : optionValuesKeys[index];
+                                var value = optionValues[key];
+                                var locals = getLocals(value, key);
+                                var viewValue = viewValueFn(scope, locals);
+                                var selectValue = getTrackByValueFn(viewValue, locals);
+                                var label = displayFn(scope, locals);
+                                var group = groupByFn(scope, locals);
+                                var disabled = disableWhenFn(scope, locals);
+                                var optionItem = new Option(selectValue, viewValue, label, group, disabled);
+                                optionItems.push(optionItem);
+                                selectValueMap[selectValue] = optionItem;
+                            }
+                            return {
+                                items: optionItems,
+                                selectValueMap: selectValueMap,
+                                getOptionFromViewValue: function (value) {
+                                    return selectValueMap[getTrackByValue(value)];
+                                },
+                                getViewValueFromOption: function (option) {
+                                    return trackBy ? angular.copy(option.viewValue) : option.viewValue;
+                                }
+                            };
+                        }
+                    };
+                }
+                var optionTemplate = window.document.createElement('option'), optGroupTemplate = window.document.createElement('optgroup');
+                function ngOptionsPostLink(scope, selectElement, attr, ctrls) {
+                    var selectCtrl = ctrls[0];
+                    var ngModelCtrl = ctrls[1];
+                    var multiple = attr.multiple;
+                    var emptyOption;
+                    for (var i = 0, children = selectElement.children(), ii = children.length; i < ii; i++) {
+                        if (children[i].value === '') {
+                            emptyOption = children.eq(i);
+                            break;
+                        }
+                    }
+                    var providedEmptyOption = !!emptyOption;
+                    var unknownOption = jqLite(optionTemplate.cloneNode(false));
+                    unknownOption.val('?');
+                    var options;
+                    var ngOptions = parseOptionsExpression(attr.ngOptions, selectElement, scope);
+                    var listFragment = $document[0].createDocumentFragment();
+                    var renderEmptyOption = function () {
+                        if (!providedEmptyOption) {
+                            selectElement.prepend(emptyOption);
+                        }
+                        selectElement.val('');
+                        emptyOption.prop('selected', true);
+                        emptyOption.attr('selected', true);
+                    };
+                    var removeEmptyOption = function () {
+                        if (!providedEmptyOption) {
+                            emptyOption.remove();
+                        }
+                    };
+                    var renderUnknownOption = function () {
+                        selectElement.prepend(unknownOption);
+                        selectElement.val('?');
+                        unknownOption.prop('selected', true);
+                        unknownOption.attr('selected', true);
+                    };
+                    var removeUnknownOption = function () {
+                        unknownOption.remove();
+                    };
+                    if (!multiple) {
+                        selectCtrl.writeValue = function writeNgOptionsValue(value) {
+                            var option = options.getOptionFromViewValue(value);
+                            if (option) {
+                                if (selectElement[0].value !== option.selectValue) {
+                                    removeUnknownOption();
+                                    removeEmptyOption();
+                                    selectElement[0].value = option.selectValue;
+                                    option.element.selected = true;
+                                }
+                                option.element.setAttribute('selected', 'selected');
+                            } else {
+                                if (value === null || providedEmptyOption) {
+                                    removeUnknownOption();
+                                    renderEmptyOption();
+                                } else {
+                                    removeEmptyOption();
+                                    renderUnknownOption();
+                                }
+                            }
+                        };
+                        selectCtrl.readValue = function readNgOptionsValue() {
+                            var selectedOption = options.selectValueMap[selectElement.val()];
+                            if (selectedOption && !selectedOption.disabled) {
+                                removeEmptyOption();
+                                removeUnknownOption();
+                                return options.getViewValueFromOption(selectedOption);
+                            }
+                            return null;
+                        };
+                        if (ngOptions.trackBy) {
+                            scope.$watch(function () {
+                                return ngOptions.getTrackByValue(ngModelCtrl.$viewValue);
+                            }, function () {
+                                ngModelCtrl.$render();
+                            });
+                        }
+                    } else {
+                        ngModelCtrl.$isEmpty = function (value) {
+                            return !value || value.length === 0;
+                        };
+                        selectCtrl.writeValue = function writeNgOptionsMultiple(value) {
+                            options.items.forEach(function (option) {
+                                option.element.selected = false;
+                            });
+                            if (value) {
+                                value.forEach(function (item) {
+                                    var option = options.getOptionFromViewValue(item);
+                                    if (option)
+                                        option.element.selected = true;
+                                });
+                            }
+                        };
+                        selectCtrl.readValue = function readNgOptionsMultiple() {
+                            var selectedValues = selectElement.val() || [], selections = [];
+                            forEach(selectedValues, function (value) {
+                                var option = options.selectValueMap[value];
+                                if (option && !option.disabled)
+                                    selections.push(options.getViewValueFromOption(option));
+                            });
+                            return selections;
+                        };
+                        if (ngOptions.trackBy) {
+                            scope.$watchCollection(function () {
+                                if (isArray(ngModelCtrl.$viewValue)) {
+                                    return ngModelCtrl.$viewValue.map(function (value) {
+                                        return ngOptions.getTrackByValue(value);
+                                    });
+                                }
+                            }, function () {
+                                ngModelCtrl.$render();
+                            });
+                        }
+                    }
+                    if (providedEmptyOption) {
+                        emptyOption.remove();
+                        $compile(emptyOption)(scope);
+                        emptyOption.removeClass('ng-scope');
+                    } else {
+                        emptyOption = jqLite(optionTemplate.cloneNode(false));
+                    }
+                    selectElement.empty();
+                    updateOptions();
+                    scope.$watchCollection(ngOptions.getWatchables, updateOptions);
+                    function addOptionElement(option, parent) {
+                        var optionElement = optionTemplate.cloneNode(false);
+                        parent.appendChild(optionElement);
+                        updateOptionElement(option, optionElement);
+                    }
+                    function updateOptionElement(option, element) {
+                        option.element = element;
+                        element.disabled = option.disabled;
+                        if (option.label !== element.label) {
+                            element.label = option.label;
+                            element.textContent = option.label;
+                        }
+                        if (option.value !== element.value)
+                            element.value = option.selectValue;
+                    }
+                    function updateOptions() {
+                        var previousValue = options && selectCtrl.readValue();
+                        if (options) {
+                            for (var i = options.items.length - 1; i >= 0; i--) {
+                                var option = options.items[i];
+                                if (option.group) {
+                                    jqLiteRemove(option.element.parentNode);
+                                } else {
+                                    jqLiteRemove(option.element);
+                                }
+                            }
+                        }
+                        options = ngOptions.getOptions();
+                        var groupElementMap = {};
+                        if (providedEmptyOption) {
+                            selectElement.prepend(emptyOption);
+                        }
+                        options.items.forEach(function addOption(option) {
+                            var groupElement;
+                            if (isDefined(option.group)) {
+                                groupElement = groupElementMap[option.group];
+                                if (!groupElement) {
+                                    groupElement = optGroupTemplate.cloneNode(false);
+                                    listFragment.appendChild(groupElement);
+                                    groupElement.label = option.group;
+                                    groupElementMap[option.group] = groupElement;
+                                }
+                                addOptionElement(option, groupElement);
+                            } else {
+                                addOptionElement(option, listFragment);
+                            }
+                        });
+                        selectElement[0].appendChild(listFragment);
+                        ngModelCtrl.$render();
+                        if (!ngModelCtrl.$isEmpty(previousValue)) {
+                            var nextValue = selectCtrl.readValue();
+                            var isNotPrimitive = ngOptions.trackBy || multiple;
+                            if (isNotPrimitive ? !equals(previousValue, nextValue) : previousValue !== nextValue) {
+                                ngModelCtrl.$setViewValue(nextValue);
+                                ngModelCtrl.$render();
+                            }
+                        }
+                    }
+                }
+                return {
+                    restrict: 'A',
+                    terminal: true,
+                    require: [
+                        'select',
+                        'ngModel'
+                    ],
+                    link: {
+                        pre: function ngOptionsPreLink(scope, selectElement, attr, ctrls) {
+                            ctrls[0].registerOption = noop;
+                        },
+                        post: ngOptionsPostLink
+                    }
+                };
+            }
+        ];
         var ngPluralizeDirective = [
             '$locale',
             '$interpolate',
-            function ($locale, $interpolate) {
-                var BRACE = /{}/g;
+            '$log',
+            function ($locale, $interpolate, $log) {
+                var BRACE = /{}/g, IS_WHEN = /^when(Minus)?(.+)$/;
                 return {
-                    restrict: 'EA',
                     link: function (scope, element, attr) {
-                        var numberExp = attr.count, whenExp = attr.$attr.when && element.attr(attr.$attr.when), offset = attr.offset || 0, whens = scope.$eval(whenExp) || {}, whensExpFns = {}, startSymbol = $interpolate.startSymbol(), endSymbol = $interpolate.endSymbol(), isWhen = /^when(Minus)?(.+)$/;
+                        var numberExp = attr.count, whenExp = attr.$attr.when && element.attr(attr.$attr.when), offset = attr.offset || 0, whens = scope.$eval(whenExp) || {}, whensExpFns = {}, startSymbol = $interpolate.startSymbol(), endSymbol = $interpolate.endSymbol(), braceReplacement = startSymbol + numberExp + '-' + offset + endSymbol, watchRemover = angular.noop, lastCount;
                         forEach(attr, function (expression, attributeName) {
-                            if (isWhen.test(attributeName)) {
-                                whens[lowercase(attributeName.replace('when', '').replace('Minus', '-'))] = element.attr(attr.$attr[attributeName]);
+                            var tmpMatch = IS_WHEN.exec(attributeName);
+                            if (tmpMatch) {
+                                var whenKey = (tmpMatch[1] ? '-' : '') + lowercase(tmpMatch[2]);
+                                whens[whenKey] = element.attr(attr.$attr[attributeName]);
                             }
                         });
                         forEach(whens, function (expression, key) {
-                            whensExpFns[key] = $interpolate(expression.replace(BRACE, startSymbol + numberExp + '-' + offset + endSymbol));
+                            whensExpFns[key] = $interpolate(expression.replace(BRACE, braceReplacement));
                         });
-                        scope.$watch(function ngPluralizeWatch() {
-                            var value = parseFloat(scope.$eval(numberExp));
-                            if (!isNaN(value)) {
-                                if (!(value in whens))
-                                    value = $locale.pluralCat(value - offset);
-                                return whensExpFns[value](scope, element, true);
-                            } else {
-                                return '';
+                        scope.$watch(numberExp, function ngPluralizeWatchAction(newVal) {
+                            var count = parseFloat(newVal);
+                            var countIsNaN = isNaN(count);
+                            if (!countIsNaN && !(count in whens)) {
+                                count = $locale.pluralCat(count - offset);
                             }
-                        }, function ngPluralizeWatchAction(newVal) {
-                            element.text(newVal);
+                            if (count !== lastCount && !(countIsNaN && isNumber(lastCount) && isNaN(lastCount))) {
+                                watchRemover();
+                                var whenExpFn = whensExpFns[count];
+                                if (isUndefined(whenExpFn)) {
+                                    if (newVal != null) {
+                                        $log.debug('ngPluralize: no rule defined for \'' + count + '\' in ' + whenExp);
+                                    }
+                                    watchRemover = noop;
+                                    updateElementText();
+                                } else {
+                                    watchRemover = scope.$watch(whenExpFn, updateElementText);
+                                }
+                                lastCount = count;
+                            }
                         });
+                        function updateElementText(newText) {
+                            element.text(newText || '');
+                        }
                     }
                 };
             }
@@ -7121,32 +11403,57 @@ define('angular', [], function () {
         var ngRepeatDirective = [
             '$parse',
             '$animate',
-            function ($parse, $animate) {
+            '$compile',
+            function ($parse, $animate, $compile) {
                 var NG_REMOVED = '$$NG_REMOVED';
                 var ngRepeatMinErr = minErr('ngRepeat');
+                var updateScope = function (scope, index, valueIdentifier, value, keyIdentifier, key, arrayLength) {
+                    scope[valueIdentifier] = value;
+                    if (keyIdentifier)
+                        scope[keyIdentifier] = key;
+                    scope.$index = index;
+                    scope.$first = index === 0;
+                    scope.$last = index === arrayLength - 1;
+                    scope.$middle = !(scope.$first || scope.$last);
+                    scope.$odd = !(scope.$even = (index & 1) === 0);
+                };
+                var getBlockStart = function (block) {
+                    return block.clone[0];
+                };
+                var getBlockEnd = function (block) {
+                    return block.clone[block.clone.length - 1];
+                };
                 return {
+                    restrict: 'A',
+                    multiElement: true,
                     transclude: 'element',
                     priority: 1000,
                     terminal: true,
                     $$tlb: true,
-                    link: function ($scope, $element, $attr, ctrl, $transclude) {
+                    compile: function ngRepeatCompile($element, $attr) {
                         var expression = $attr.ngRepeat;
-                        var match = expression.match(/^\s*(.+)\s+in\s+(.*?)\s*(\s+track\s+by\s+(.+)\s*)?$/), trackByExp, trackByExpGetter, trackByIdExpFn, trackByIdArrayFn, trackByIdObjFn, lhs, rhs, valueIdentifier, keyIdentifier, hashFnLocals = { $id: hashKey };
+                        var ngRepeatEndComment = $compile.$$createComment('end ngRepeat', expression);
+                        var match = expression.match(/^\s*([\s\S]+?)\s+in\s+([\s\S]+?)(?:\s+as\s+([\s\S]+?))?(?:\s+track\s+by\s+([\s\S]+?))?\s*$/);
                         if (!match) {
                             throw ngRepeatMinErr('iexp', 'Expected expression in form of \'_item_ in _collection_[ track by _id_]\' but got \'{0}\'.', expression);
                         }
-                        lhs = match[1];
-                        rhs = match[2];
-                        trackByExp = match[4];
+                        var lhs = match[1];
+                        var rhs = match[2];
+                        var aliasAs = match[3];
+                        var trackByExp = match[4];
+                        match = lhs.match(/^(?:(\s*[\$\w]+)|\(\s*([\$\w]+)\s*,\s*([\$\w]+)\s*\))$/);
+                        if (!match) {
+                            throw ngRepeatMinErr('iidexp', '\'_item_\' in \'_item_ in _collection_\' should be an identifier or \'(_key_, _value_)\' expression, but got \'{0}\'.', lhs);
+                        }
+                        var valueIdentifier = match[3] || match[1];
+                        var keyIdentifier = match[2];
+                        if (aliasAs && (!/^[$a-zA-Z_][$a-zA-Z0-9_]*$/.test(aliasAs) || /^(null|undefined|this|\$index|\$first|\$middle|\$last|\$even|\$odd|\$parent|\$root|\$id)$/.test(aliasAs))) {
+                            throw ngRepeatMinErr('badident', 'alias \'{0}\' is invalid --- must be a valid JS identifier which is not a reserved name.', aliasAs);
+                        }
+                        var trackByExpGetter, trackByIdExpFn, trackByIdArrayFn, trackByIdObjFn;
+                        var hashFnLocals = { $id: hashKey };
                         if (trackByExp) {
                             trackByExpGetter = $parse(trackByExp);
-                            trackByIdExpFn = function (key, value, index) {
-                                if (keyIdentifier)
-                                    hashFnLocals[keyIdentifier] = key;
-                                hashFnLocals[valueIdentifier] = value;
-                                hashFnLocals.$index = index;
-                                return trackByExpGetter($scope, hashFnLocals);
-                            };
                         } else {
                             trackByIdArrayFn = function (key, value) {
                                 return hashKey(value);
@@ -7155,124 +11462,132 @@ define('angular', [], function () {
                                 return key;
                             };
                         }
-                        match = lhs.match(/^(?:([\$\w]+)|\(([\$\w]+)\s*,\s*([\$\w]+)\))$/);
-                        if (!match) {
-                            throw ngRepeatMinErr('iidexp', '\'_item_\' in \'_item_ in _collection_\' should be an identifier or \'(_key_, _value_)\' expression, but got \'{0}\'.', lhs);
-                        }
-                        valueIdentifier = match[3] || match[1];
-                        keyIdentifier = match[2];
-                        var lastBlockMap = {};
-                        $scope.$watchCollection(rhs, function ngRepeatAction(collection) {
-                            var index, length, previousNode = $element[0], nextNode, nextBlockMap = {}, arrayLength, childScope, key, value, trackById, trackByIdFn, collectionKeys, block, nextBlockOrder = [], elementsToRemove;
-                            if (isArrayLike(collection)) {
-                                collectionKeys = collection;
-                                trackByIdFn = trackByIdExpFn || trackByIdArrayFn;
-                            } else {
-                                trackByIdFn = trackByIdExpFn || trackByIdObjFn;
-                                collectionKeys = [];
-                                for (key in collection) {
-                                    if (collection.hasOwnProperty(key) && key.charAt(0) != '$') {
-                                        collectionKeys.push(key);
+                        return function ngRepeatLink($scope, $element, $attr, ctrl, $transclude) {
+                            if (trackByExpGetter) {
+                                trackByIdExpFn = function (key, value, index) {
+                                    if (keyIdentifier)
+                                        hashFnLocals[keyIdentifier] = key;
+                                    hashFnLocals[valueIdentifier] = value;
+                                    hashFnLocals.$index = index;
+                                    return trackByExpGetter($scope, hashFnLocals);
+                                };
+                            }
+                            var lastBlockMap = createMap();
+                            $scope.$watchCollection(rhs, function ngRepeatAction(collection) {
+                                var index, length, previousNode = $element[0], nextNode, nextBlockMap = createMap(), collectionLength, key, value, trackById, trackByIdFn, collectionKeys, block, nextBlockOrder, elementsToRemove;
+                                if (aliasAs) {
+                                    $scope[aliasAs] = collection;
+                                }
+                                if (isArrayLike(collection)) {
+                                    collectionKeys = collection;
+                                    trackByIdFn = trackByIdExpFn || trackByIdArrayFn;
+                                } else {
+                                    trackByIdFn = trackByIdExpFn || trackByIdObjFn;
+                                    collectionKeys = [];
+                                    for (var itemKey in collection) {
+                                        if (hasOwnProperty.call(collection, itemKey) && itemKey.charAt(0) !== '$') {
+                                            collectionKeys.push(itemKey);
+                                        }
                                     }
                                 }
-                                collectionKeys.sort();
-                            }
-                            arrayLength = collectionKeys.length;
-                            length = nextBlockOrder.length = collectionKeys.length;
-                            for (index = 0; index < length; index++) {
-                                key = collection === collectionKeys ? index : collectionKeys[index];
-                                value = collection[key];
-                                trackById = trackByIdFn(key, value, index);
-                                assertNotHasOwnProperty(trackById, '`track by` id');
-                                if (lastBlockMap.hasOwnProperty(trackById)) {
-                                    block = lastBlockMap[trackById];
-                                    delete lastBlockMap[trackById];
-                                    nextBlockMap[trackById] = block;
-                                    nextBlockOrder[index] = block;
-                                } else if (nextBlockMap.hasOwnProperty(trackById)) {
-                                    forEach(nextBlockOrder, function (block) {
-                                        if (block && block.startNode)
-                                            lastBlockMap[block.id] = block;
-                                    });
-                                    throw ngRepeatMinErr('dupes', 'Duplicates in a repeater are not allowed. Use \'track by\' expression to specify unique keys. Repeater: {0}, Duplicate key: {1}', expression, trackById);
-                                } else {
-                                    nextBlockOrder[index] = { id: trackById };
-                                    nextBlockMap[trackById] = false;
+                                collectionLength = collectionKeys.length;
+                                nextBlockOrder = new Array(collectionLength);
+                                for (index = 0; index < collectionLength; index++) {
+                                    key = collection === collectionKeys ? index : collectionKeys[index];
+                                    value = collection[key];
+                                    trackById = trackByIdFn(key, value, index);
+                                    if (lastBlockMap[trackById]) {
+                                        block = lastBlockMap[trackById];
+                                        delete lastBlockMap[trackById];
+                                        nextBlockMap[trackById] = block;
+                                        nextBlockOrder[index] = block;
+                                    } else if (nextBlockMap[trackById]) {
+                                        forEach(nextBlockOrder, function (block) {
+                                            if (block && block.scope)
+                                                lastBlockMap[block.id] = block;
+                                        });
+                                        throw ngRepeatMinErr('dupes', 'Duplicates in a repeater are not allowed. Use \'track by\' expression to specify unique keys. Repeater: {0}, Duplicate key: {1}, Duplicate value: {2}', expression, trackById, value);
+                                    } else {
+                                        nextBlockOrder[index] = {
+                                            id: trackById,
+                                            scope: undefined,
+                                            clone: undefined
+                                        };
+                                        nextBlockMap[trackById] = true;
+                                    }
                                 }
-                            }
-                            for (key in lastBlockMap) {
-                                if (lastBlockMap.hasOwnProperty(key)) {
-                                    block = lastBlockMap[key];
-                                    elementsToRemove = getBlockElements(block);
+                                for (var blockKey in lastBlockMap) {
+                                    block = lastBlockMap[blockKey];
+                                    elementsToRemove = getBlockNodes(block.clone);
                                     $animate.leave(elementsToRemove);
-                                    forEach(elementsToRemove, function (element) {
-                                        element[NG_REMOVED] = true;
-                                    });
+                                    if (elementsToRemove[0].parentNode) {
+                                        for (index = 0, length = elementsToRemove.length; index < length; index++) {
+                                            elementsToRemove[index][NG_REMOVED] = true;
+                                        }
+                                    }
                                     block.scope.$destroy();
                                 }
-                            }
-                            for (index = 0, length = collectionKeys.length; index < length; index++) {
-                                key = collection === collectionKeys ? index : collectionKeys[index];
-                                value = collection[key];
-                                block = nextBlockOrder[index];
-                                if (nextBlockOrder[index - 1])
-                                    previousNode = nextBlockOrder[index - 1].endNode;
-                                if (block.startNode) {
-                                    childScope = block.scope;
-                                    nextNode = previousNode;
-                                    do {
-                                        nextNode = nextNode.nextSibling;
-                                    } while (nextNode && nextNode[NG_REMOVED]);
-                                    if (block.startNode != nextNode) {
-                                        $animate.move(getBlockElements(block), null, jqLite(previousNode));
+                                for (index = 0; index < collectionLength; index++) {
+                                    key = collection === collectionKeys ? index : collectionKeys[index];
+                                    value = collection[key];
+                                    block = nextBlockOrder[index];
+                                    if (block.scope) {
+                                        nextNode = previousNode;
+                                        do {
+                                            nextNode = nextNode.nextSibling;
+                                        } while (nextNode && nextNode[NG_REMOVED]);
+                                        if (getBlockStart(block) != nextNode) {
+                                            $animate.move(getBlockNodes(block.clone), null, previousNode);
+                                        }
+                                        previousNode = getBlockEnd(block);
+                                        updateScope(block.scope, index, valueIdentifier, value, keyIdentifier, key, collectionLength);
+                                    } else {
+                                        $transclude(function ngRepeatTransclude(clone, scope) {
+                                            block.scope = scope;
+                                            var endNode = ngRepeatEndComment.cloneNode(false);
+                                            clone[clone.length++] = endNode;
+                                            $animate.enter(clone, null, previousNode);
+                                            previousNode = endNode;
+                                            block.clone = clone;
+                                            nextBlockMap[block.id] = block;
+                                            updateScope(block.scope, index, valueIdentifier, value, keyIdentifier, key, collectionLength);
+                                        });
                                     }
-                                    previousNode = block.endNode;
-                                } else {
-                                    childScope = $scope.$new();
                                 }
-                                childScope[valueIdentifier] = value;
-                                if (keyIdentifier)
-                                    childScope[keyIdentifier] = key;
-                                childScope.$index = index;
-                                childScope.$first = index === 0;
-                                childScope.$last = index === arrayLength - 1;
-                                childScope.$middle = !(childScope.$first || childScope.$last);
-                                childScope.$odd = !(childScope.$even = (index & 1) === 0);
-                                if (!block.startNode) {
-                                    $transclude(childScope, function (clone) {
-                                        clone[clone.length++] = document.createComment(' end ngRepeat: ' + expression + ' ');
-                                        $animate.enter(clone, null, jqLite(previousNode));
-                                        previousNode = clone;
-                                        block.scope = childScope;
-                                        block.startNode = previousNode && previousNode.endNode ? previousNode.endNode : clone[0];
-                                        block.endNode = clone[clone.length - 1];
-                                        nextBlockMap[block.id] = block;
-                                    });
-                                }
-                            }
-                            lastBlockMap = nextBlockMap;
-                        });
+                                lastBlockMap = nextBlockMap;
+                            });
+                        };
                     }
                 };
             }
         ];
+        var NG_HIDE_CLASS = 'ng-hide';
+        var NG_HIDE_IN_PROGRESS_CLASS = 'ng-hide-animate';
         var ngShowDirective = [
             '$animate',
             function ($animate) {
-                return function (scope, element, attr) {
-                    scope.$watch(attr.ngShow, function ngShowWatchAction(value) {
-                        $animate[toBoolean(value) ? 'removeClass' : 'addClass'](element, 'ng-hide');
-                    });
+                return {
+                    restrict: 'A',
+                    multiElement: true,
+                    link: function (scope, element, attr) {
+                        scope.$watch(attr.ngShow, function ngShowWatchAction(value) {
+                            $animate[value ? 'removeClass' : 'addClass'](element, NG_HIDE_CLASS, { tempClasses: NG_HIDE_IN_PROGRESS_CLASS });
+                        });
+                    }
                 };
             }
         ];
         var ngHideDirective = [
             '$animate',
             function ($animate) {
-                return function (scope, element, attr) {
-                    scope.$watch(attr.ngHide, function ngHideWatchAction(value) {
-                        $animate[toBoolean(value) ? 'addClass' : 'removeClass'](element, 'ng-hide');
-                    });
+                return {
+                    restrict: 'A',
+                    multiElement: true,
+                    link: function (scope, element, attr) {
+                        scope.$watch(attr.ngHide, function ngHideWatchAction(value) {
+                            $animate[value ? 'addClass' : 'removeClass'](element, NG_HIDE_CLASS, { tempClasses: NG_HIDE_IN_PROGRESS_CLASS });
+                        });
+                    }
                 };
             }
         ];
@@ -7289,9 +11604,9 @@ define('angular', [], function () {
         });
         var ngSwitchDirective = [
             '$animate',
-            function ($animate) {
+            '$compile',
+            function ($animate, $compile) {
                 return {
-                    restrict: 'EA',
                     require: 'ngSwitch',
                     controller: [
                         '$scope',
@@ -7300,22 +11615,34 @@ define('angular', [], function () {
                         }
                     ],
                     link: function (scope, element, attr, ngSwitchController) {
-                        var watchExpr = attr.ngSwitch || attr.on, selectedTranscludes, selectedElements, selectedScopes = [];
+                        var watchExpr = attr.ngSwitch || attr.on, selectedTranscludes = [], selectedElements = [], previousLeaveAnimations = [], selectedScopes = [];
+                        var spliceFactory = function (array, index) {
+                            return function () {
+                                array.splice(index, 1);
+                            };
+                        };
                         scope.$watch(watchExpr, function ngSwitchWatchAction(value) {
-                            for (var i = 0, ii = selectedScopes.length; i < ii; i++) {
-                                selectedScopes[i].$destroy();
-                                $animate.leave(selectedElements[i]);
+                            var i, ii;
+                            for (i = 0, ii = previousLeaveAnimations.length; i < ii; ++i) {
+                                $animate.cancel(previousLeaveAnimations[i]);
                             }
-                            selectedElements = [];
-                            selectedScopes = [];
+                            previousLeaveAnimations.length = 0;
+                            for (i = 0, ii = selectedScopes.length; i < ii; ++i) {
+                                var selected = getBlockNodes(selectedElements[i].clone);
+                                selectedScopes[i].$destroy();
+                                var promise = previousLeaveAnimations[i] = $animate.leave(selected);
+                                promise.then(spliceFactory(previousLeaveAnimations, i));
+                            }
+                            selectedElements.length = 0;
+                            selectedScopes.length = 0;
                             if (selectedTranscludes = ngSwitchController.cases['!' + value] || ngSwitchController.cases['?']) {
-                                scope.$eval(attr.change);
                                 forEach(selectedTranscludes, function (selectedTransclude) {
-                                    var selectedScope = scope.$new();
-                                    selectedScopes.push(selectedScope);
-                                    selectedTransclude.transclude(selectedScope, function (caseElement) {
+                                    selectedTransclude.transclude(function (caseElement, selectedScope) {
+                                        selectedScopes.push(selectedScope);
                                         var anchor = selectedTransclude.element;
-                                        selectedElements.push(caseElement);
+                                        caseElement[caseElement.length++] = $compile.$$createComment('end ngSwitchWhen');
+                                        var block = { clone: caseElement };
+                                        selectedElements.push(block);
                                         $animate.enter(caseElement, anchor.parent(), anchor);
                                     });
                                 });
@@ -7327,22 +11654,22 @@ define('angular', [], function () {
         ];
         var ngSwitchWhenDirective = ngDirective({
             transclude: 'element',
-            priority: 800,
+            priority: 1200,
             require: '^ngSwitch',
-            compile: function (element, attrs) {
-                return function (scope, element, attr, ctrl, $transclude) {
-                    ctrl.cases['!' + attrs.ngSwitchWhen] = ctrl.cases['!' + attrs.ngSwitchWhen] || [];
-                    ctrl.cases['!' + attrs.ngSwitchWhen].push({
-                        transclude: $transclude,
-                        element: element
-                    });
-                };
+            multiElement: true,
+            link: function (scope, element, attrs, ctrl, $transclude) {
+                ctrl.cases['!' + attrs.ngSwitchWhen] = ctrl.cases['!' + attrs.ngSwitchWhen] || [];
+                ctrl.cases['!' + attrs.ngSwitchWhen].push({
+                    transclude: $transclude,
+                    element: element
+                });
             }
         });
         var ngSwitchDefaultDirective = ngDirective({
             transclude: 'element',
-            priority: 800,
+            priority: 1200,
             require: '^ngSwitch',
+            multiElement: true,
             link: function (scope, element, attr, ctrl, $transclude) {
                 ctrl.cases['?'] = ctrl.cases['?'] || [];
                 ctrl.cases['?'].push({
@@ -7351,22 +11678,24 @@ define('angular', [], function () {
                 });
             }
         });
+        var ngTranscludeMinErr = minErr('ngTransclude');
         var ngTranscludeDirective = ngDirective({
-            controller: [
-                '$element',
-                '$transclude',
-                function ($element, $transclude) {
-                    if (!$transclude) {
-                        throw minErr('ngTransclude')('orphan', 'Illegal use of ngTransclude directive in the template! ' + 'No parent directive that requires a transclusion found. ' + 'Element: {0}', startingTag($element));
-                    }
-                    this.$transclude = $transclude;
+            restrict: 'EAC',
+            link: function ($scope, $element, $attrs, controller, $transclude) {
+                if ($attrs.ngTransclude === $attrs.$attr.ngTransclude) {
+                    $attrs.ngTransclude = '';
                 }
-            ],
-            link: function ($scope, $element, $attrs, controller) {
-                controller.$transclude(function (clone) {
-                    $element.html('');
-                    $element.append(clone);
-                });
+                function ngTranscludeCloneAttachFn(clone) {
+                    if (clone.length) {
+                        $element.empty();
+                        $element.append(clone);
+                    }
+                }
+                if (!$transclude) {
+                    throw ngTranscludeMinErr('orphan', 'Illegal use of ngTransclude directive in the template! ' + 'No parent directive that requires a transclusion found. ' + 'Element: {0}', startingTag($element));
+                }
+                var slotName = $attrs.ngTransclude || $attrs.ngTranscludeSlot;
+                $transclude(ngTranscludeCloneAttachFn, null, slotName);
             }
         });
         var scriptDirective = [
@@ -7384,375 +11713,194 @@ define('angular', [], function () {
                 };
             }
         ];
-        var ngOptionsMinErr = minErr('ngOptions');
-        var ngOptionsDirective = valueFn({ terminal: true });
-        var selectDirective = [
-            '$compile',
-            '$parse',
-            function ($compile, $parse) {
-                var NG_OPTIONS_REGEXP = /^\s*(.*?)(?:\s+as\s+(.*?))?(?:\s+group\s+by\s+(.*))?\s+for\s+(?:([\$\w][\$\w]*)|(?:\(\s*([\$\w][\$\w]*)\s*,\s*([\$\w][\$\w]*)\s*\)))\s+in\s+(.*?)(?:\s+track\s+by\s+(.*?))?$/, nullModelCtrl = { $setViewValue: noop };
-                return {
-                    restrict: 'E',
-                    require: [
-                        'select',
-                        '?ngModel'
-                    ],
-                    controller: [
-                        '$element',
-                        '$scope',
-                        '$attrs',
-                        function ($element, $scope, $attrs) {
-                            var self = this, optionsMap = {}, ngModelCtrl = nullModelCtrl, nullOption, unknownOption;
-                            self.databound = $attrs.ngModel;
-                            self.init = function (ngModelCtrl_, nullOption_, unknownOption_) {
-                                ngModelCtrl = ngModelCtrl_;
-                                nullOption = nullOption_;
-                                unknownOption = unknownOption_;
-                            };
-                            self.addOption = function (value) {
-                                assertNotHasOwnProperty(value, '"option value"');
-                                optionsMap[value] = true;
-                                if (ngModelCtrl.$viewValue == value) {
-                                    $element.val(value);
-                                    if (unknownOption.parent())
-                                        unknownOption.remove();
-                                }
-                            };
-                            self.removeOption = function (value) {
-                                if (this.hasOption(value)) {
-                                    delete optionsMap[value];
-                                    if (ngModelCtrl.$viewValue == value) {
-                                        this.renderUnknownOption(value);
-                                    }
-                                }
-                            };
-                            self.renderUnknownOption = function (val) {
-                                var unknownVal = '? ' + hashKey(val) + ' ?';
-                                unknownOption.val(unknownVal);
-                                $element.prepend(unknownOption);
-                                $element.val(unknownVal);
-                                unknownOption.prop('selected', true);
-                            };
-                            self.hasOption = function (value) {
-                                return optionsMap.hasOwnProperty(value);
-                            };
-                            $scope.$on('$destroy', function () {
-                                self.renderUnknownOption = noop;
-                            });
-                        }
-                    ],
-                    link: function (scope, element, attr, ctrls) {
-                        if (!ctrls[1])
-                            return;
-                        var selectCtrl = ctrls[0], ngModelCtrl = ctrls[1], multiple = attr.multiple, optionsExp = attr.ngOptions, nullOption = false, emptyOption, optionTemplate = jqLite(document.createElement('option')), optGroupTemplate = jqLite(document.createElement('optgroup')), unknownOption = optionTemplate.clone();
-                        for (var i = 0, children = element.children(), ii = children.length; i < ii; i++) {
-                            if (children[i].value === '') {
-                                emptyOption = nullOption = children.eq(i);
-                                break;
-                            }
-                        }
-                        selectCtrl.init(ngModelCtrl, nullOption, unknownOption);
-                        if (multiple && (attr.required || attr.ngRequired)) {
-                            var requiredValidator = function (value) {
-                                ngModelCtrl.$setValidity('required', !attr.required || value && value.length);
-                                return value;
-                            };
-                            ngModelCtrl.$parsers.push(requiredValidator);
-                            ngModelCtrl.$formatters.unshift(requiredValidator);
-                            attr.$observe('required', function () {
-                                requiredValidator(ngModelCtrl.$viewValue);
-                            });
-                        }
-                        if (optionsExp)
-                            setupAsOptions(scope, element, ngModelCtrl);
-                        else if (multiple)
-                            setupAsMultiple(scope, element, ngModelCtrl);
-                        else
-                            setupAsSingle(scope, element, ngModelCtrl, selectCtrl);
-                        function setupAsSingle(scope, selectElement, ngModelCtrl, selectCtrl) {
-                            ngModelCtrl.$render = function () {
-                                var viewValue = ngModelCtrl.$viewValue;
-                                if (selectCtrl.hasOption(viewValue)) {
-                                    if (unknownOption.parent())
-                                        unknownOption.remove();
-                                    selectElement.val(viewValue);
-                                    if (viewValue === '')
-                                        emptyOption.prop('selected', true);
-                                } else {
-                                    if (isUndefined(viewValue) && emptyOption) {
-                                        selectElement.val('');
-                                    } else {
-                                        selectCtrl.renderUnknownOption(viewValue);
-                                    }
-                                }
-                            };
-                            selectElement.on('change', function () {
-                                scope.$apply(function () {
-                                    if (unknownOption.parent())
-                                        unknownOption.remove();
-                                    ngModelCtrl.$setViewValue(selectElement.val());
-                                });
-                            });
-                        }
-                        function setupAsMultiple(scope, selectElement, ctrl) {
-                            var lastView;
-                            ctrl.$render = function () {
-                                var items = new HashMap(ctrl.$viewValue);
-                                forEach(selectElement.find('option'), function (option) {
-                                    option.selected = isDefined(items.get(option.value));
-                                });
-                            };
-                            scope.$watch(function selectMultipleWatch() {
-                                if (!equals(lastView, ctrl.$viewValue)) {
-                                    lastView = copy(ctrl.$viewValue);
-                                    ctrl.$render();
-                                }
-                            });
-                            selectElement.on('change', function () {
-                                scope.$apply(function () {
-                                    var array = [];
-                                    forEach(selectElement.find('option'), function (option) {
-                                        if (option.selected) {
-                                            array.push(option.value);
-                                        }
-                                    });
-                                    ctrl.$setViewValue(array);
-                                });
-                            });
-                        }
-                        function setupAsOptions(scope, selectElement, ctrl) {
-                            var match;
-                            if (!(match = optionsExp.match(NG_OPTIONS_REGEXP))) {
-                                throw ngOptionsMinErr('iexp', 'Expected expression in form of ' + '\'_select_ (as _label_)? for (_key_,)?_value_ in _collection_\'' + ' but got \'{0}\'. Element: {1}', optionsExp, startingTag(selectElement));
-                            }
-                            var displayFn = $parse(match[2] || match[1]), valueName = match[4] || match[6], keyName = match[5], groupByFn = $parse(match[3] || ''), valueFn = $parse(match[2] ? match[1] : valueName), valuesFn = $parse(match[7]), track = match[8], trackFn = track ? $parse(match[8]) : null, optionGroupsCache = [[{
-                                            element: selectElement,
-                                            label: ''
-                                        }]];
-                            if (nullOption) {
-                                $compile(nullOption)(scope);
-                                nullOption.removeClass('ng-scope');
-                                nullOption.remove();
-                            }
-                            selectElement.html('');
-                            selectElement.on('change', function () {
-                                scope.$apply(function () {
-                                    var optionGroup, collection = valuesFn(scope) || [], locals = {}, key, value, optionElement, index, groupIndex, length, groupLength, trackIndex;
-                                    if (multiple) {
-                                        value = [];
-                                        for (groupIndex = 0, groupLength = optionGroupsCache.length; groupIndex < groupLength; groupIndex++) {
-                                            optionGroup = optionGroupsCache[groupIndex];
-                                            for (index = 1, length = optionGroup.length; index < length; index++) {
-                                                if ((optionElement = optionGroup[index].element)[0].selected) {
-                                                    key = optionElement.val();
-                                                    if (keyName)
-                                                        locals[keyName] = key;
-                                                    if (trackFn) {
-                                                        for (trackIndex = 0; trackIndex < collection.length; trackIndex++) {
-                                                            locals[valueName] = collection[trackIndex];
-                                                            if (trackFn(scope, locals) == key)
-                                                                break;
-                                                        }
-                                                    } else {
-                                                        locals[valueName] = collection[key];
-                                                    }
-                                                    value.push(valueFn(scope, locals));
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                        key = selectElement.val();
-                                        if (key == '?') {
-                                            value = undefined;
-                                        } else if (key === '') {
-                                            value = null;
-                                        } else {
-                                            if (trackFn) {
-                                                for (trackIndex = 0; trackIndex < collection.length; trackIndex++) {
-                                                    locals[valueName] = collection[trackIndex];
-                                                    if (trackFn(scope, locals) == key) {
-                                                        value = valueFn(scope, locals);
-                                                        break;
-                                                    }
-                                                }
-                                            } else {
-                                                locals[valueName] = collection[key];
-                                                if (keyName)
-                                                    locals[keyName] = key;
-                                                value = valueFn(scope, locals);
-                                            }
-                                        }
-                                    }
-                                    ctrl.$setViewValue(value);
-                                });
-                            });
-                            ctrl.$render = render;
-                            scope.$watch(render);
-                            function render() {
-                                var optionGroups = { '': [] }, optionGroupNames = [''], optionGroupName, optionGroup, option, existingParent, existingOptions, existingOption, modelValue = ctrl.$modelValue, values = valuesFn(scope) || [], keys = keyName ? sortedKeys(values) : values, key, groupLength, length, groupIndex, index, locals = {}, selected, selectedSet = false, lastElement, element, label;
-                                if (multiple) {
-                                    if (trackFn && isArray(modelValue)) {
-                                        selectedSet = new HashMap([]);
-                                        for (var trackIndex = 0; trackIndex < modelValue.length; trackIndex++) {
-                                            locals[valueName] = modelValue[trackIndex];
-                                            selectedSet.put(trackFn(scope, locals), modelValue[trackIndex]);
-                                        }
-                                    } else {
-                                        selectedSet = new HashMap(modelValue);
-                                    }
-                                }
-                                for (index = 0; length = keys.length, index < length; index++) {
-                                    key = index;
-                                    if (keyName) {
-                                        key = keys[index];
-                                        if (key.charAt(0) === '$')
-                                            continue;
-                                        locals[keyName] = key;
-                                    }
-                                    locals[valueName] = values[key];
-                                    optionGroupName = groupByFn(scope, locals) || '';
-                                    if (!(optionGroup = optionGroups[optionGroupName])) {
-                                        optionGroup = optionGroups[optionGroupName] = [];
-                                        optionGroupNames.push(optionGroupName);
-                                    }
-                                    if (multiple) {
-                                        selected = isDefined(selectedSet.remove(trackFn ? trackFn(scope, locals) : valueFn(scope, locals)));
-                                    } else {
-                                        if (trackFn) {
-                                            var modelCast = {};
-                                            modelCast[valueName] = modelValue;
-                                            selected = trackFn(scope, modelCast) === trackFn(scope, locals);
-                                        } else {
-                                            selected = modelValue === valueFn(scope, locals);
-                                        }
-                                        selectedSet = selectedSet || selected;
-                                    }
-                                    label = displayFn(scope, locals);
-                                    label = isDefined(label) ? label : '';
-                                    optionGroup.push({
-                                        id: trackFn ? trackFn(scope, locals) : keyName ? keys[index] : index,
-                                        label: label,
-                                        selected: selected
-                                    });
-                                }
-                                if (!multiple) {
-                                    if (nullOption || modelValue === null) {
-                                        optionGroups[''].unshift({
-                                            id: '',
-                                            label: '',
-                                            selected: !selectedSet
-                                        });
-                                    } else if (!selectedSet) {
-                                        optionGroups[''].unshift({
-                                            id: '?',
-                                            label: '',
-                                            selected: true
-                                        });
-                                    }
-                                }
-                                for (groupIndex = 0, groupLength = optionGroupNames.length; groupIndex < groupLength; groupIndex++) {
-                                    optionGroupName = optionGroupNames[groupIndex];
-                                    optionGroup = optionGroups[optionGroupName];
-                                    if (optionGroupsCache.length <= groupIndex) {
-                                        existingParent = {
-                                            element: optGroupTemplate.clone().attr('label', optionGroupName),
-                                            label: optionGroup.label
-                                        };
-                                        existingOptions = [existingParent];
-                                        optionGroupsCache.push(existingOptions);
-                                        selectElement.append(existingParent.element);
-                                    } else {
-                                        existingOptions = optionGroupsCache[groupIndex];
-                                        existingParent = existingOptions[0];
-                                        if (existingParent.label != optionGroupName) {
-                                            existingParent.element.attr('label', existingParent.label = optionGroupName);
-                                        }
-                                    }
-                                    lastElement = null;
-                                    for (index = 0, length = optionGroup.length; index < length; index++) {
-                                        option = optionGroup[index];
-                                        if (existingOption = existingOptions[index + 1]) {
-                                            lastElement = existingOption.element;
-                                            if (existingOption.label !== option.label) {
-                                                lastElement.text(existingOption.label = option.label);
-                                            }
-                                            if (existingOption.id !== option.id) {
-                                                lastElement.val(existingOption.id = option.id);
-                                            }
-                                            if (lastElement[0].selected !== option.selected) {
-                                                lastElement.prop('selected', existingOption.selected = option.selected);
-                                            }
-                                        } else {
-                                            if (option.id === '' && nullOption) {
-                                                element = nullOption;
-                                            } else {
-                                                (element = optionTemplate.clone()).val(option.id).attr('selected', option.selected).text(option.label);
-                                            }
-                                            existingOptions.push(existingOption = {
-                                                element: element,
-                                                label: option.label,
-                                                id: option.id,
-                                                selected: option.selected
-                                            });
-                                            if (lastElement) {
-                                                lastElement.after(element);
-                                            } else {
-                                                existingParent.element.append(element);
-                                            }
-                                            lastElement = element;
-                                        }
-                                    }
-                                    index++;
-                                    while (existingOptions.length > index) {
-                                        existingOptions.pop().element.remove();
-                                    }
-                                }
-                                while (optionGroupsCache.length > groupIndex) {
-                                    optionGroupsCache.pop()[0].element.remove();
-                                }
-                            }
+        var noopNgModelController = {
+            $setViewValue: noop,
+            $render: noop
+        };
+        function chromeHack(optionElement) {
+            if (optionElement[0].hasAttribute('selected')) {
+                optionElement[0].selected = true;
+            }
+        }
+        var SelectController = [
+            '$element',
+            '$scope',
+            function ($element, $scope) {
+                var self = this, optionsMap = new HashMap();
+                self.ngModelCtrl = noopNgModelController;
+                self.unknownOption = jqLite(window.document.createElement('option'));
+                self.renderUnknownOption = function (val) {
+                    var unknownVal = '? ' + hashKey(val) + ' ?';
+                    self.unknownOption.val(unknownVal);
+                    $element.prepend(self.unknownOption);
+                    $element.val(unknownVal);
+                };
+                $scope.$on('$destroy', function () {
+                    self.renderUnknownOption = noop;
+                });
+                self.removeUnknownOption = function () {
+                    if (self.unknownOption.parent())
+                        self.unknownOption.remove();
+                };
+                self.readValue = function readSingleValue() {
+                    self.removeUnknownOption();
+                    return $element.val();
+                };
+                self.writeValue = function writeSingleValue(value) {
+                    if (self.hasOption(value)) {
+                        self.removeUnknownOption();
+                        $element.val(value);
+                        if (value === '')
+                            self.emptyOption.prop('selected', true);
+                    } else {
+                        if (value == null && self.emptyOption) {
+                            self.removeUnknownOption();
+                            $element.val('');
+                        } else {
+                            self.renderUnknownOption(value);
                         }
                     }
                 };
+                self.addOption = function (value, element) {
+                    if (element[0].nodeType === NODE_TYPE_COMMENT)
+                        return;
+                    assertNotHasOwnProperty(value, '"option value"');
+                    if (value === '') {
+                        self.emptyOption = element;
+                    }
+                    var count = optionsMap.get(value) || 0;
+                    optionsMap.put(value, count + 1);
+                    self.ngModelCtrl.$render();
+                    chromeHack(element);
+                };
+                self.removeOption = function (value) {
+                    var count = optionsMap.get(value);
+                    if (count) {
+                        if (count === 1) {
+                            optionsMap.remove(value);
+                            if (value === '') {
+                                self.emptyOption = undefined;
+                            }
+                        } else {
+                            optionsMap.put(value, count - 1);
+                        }
+                    }
+                };
+                self.hasOption = function (value) {
+                    return !!optionsMap.get(value);
+                };
+                self.registerOption = function (optionScope, optionElement, optionAttrs, interpolateValueFn, interpolateTextFn) {
+                    if (interpolateValueFn) {
+                        var oldVal;
+                        optionAttrs.$observe('value', function valueAttributeObserveAction(newVal) {
+                            if (isDefined(oldVal)) {
+                                self.removeOption(oldVal);
+                            }
+                            oldVal = newVal;
+                            self.addOption(newVal, optionElement);
+                        });
+                    } else if (interpolateTextFn) {
+                        optionScope.$watch(interpolateTextFn, function interpolateWatchAction(newVal, oldVal) {
+                            optionAttrs.$set('value', newVal);
+                            if (oldVal !== newVal) {
+                                self.removeOption(oldVal);
+                            }
+                            self.addOption(newVal, optionElement);
+                        });
+                    } else {
+                        self.addOption(optionAttrs.value, optionElement);
+                    }
+                    optionElement.on('$destroy', function () {
+                        self.removeOption(optionAttrs.value);
+                        self.ngModelCtrl.$render();
+                    });
+                };
             }
         ];
+        var selectDirective = function () {
+            return {
+                restrict: 'E',
+                require: [
+                    'select',
+                    '?ngModel'
+                ],
+                controller: SelectController,
+                priority: 1,
+                link: {
+                    pre: selectPreLink,
+                    post: selectPostLink
+                }
+            };
+            function selectPreLink(scope, element, attr, ctrls) {
+                var ngModelCtrl = ctrls[1];
+                if (!ngModelCtrl)
+                    return;
+                var selectCtrl = ctrls[0];
+                selectCtrl.ngModelCtrl = ngModelCtrl;
+                element.on('change', function () {
+                    scope.$apply(function () {
+                        ngModelCtrl.$setViewValue(selectCtrl.readValue());
+                    });
+                });
+                if (attr.multiple) {
+                    selectCtrl.readValue = function readMultipleValue() {
+                        var array = [];
+                        forEach(element.find('option'), function (option) {
+                            if (option.selected) {
+                                array.push(option.value);
+                            }
+                        });
+                        return array;
+                    };
+                    selectCtrl.writeValue = function writeMultipleValue(value) {
+                        var items = new HashMap(value);
+                        forEach(element.find('option'), function (option) {
+                            option.selected = isDefined(items.get(option.value));
+                        });
+                    };
+                    var lastView, lastViewRef = NaN;
+                    scope.$watch(function selectMultipleWatch() {
+                        if (lastViewRef === ngModelCtrl.$viewValue && !equals(lastView, ngModelCtrl.$viewValue)) {
+                            lastView = shallowCopy(ngModelCtrl.$viewValue);
+                            ngModelCtrl.$render();
+                        }
+                        lastViewRef = ngModelCtrl.$viewValue;
+                    });
+                    ngModelCtrl.$isEmpty = function (value) {
+                        return !value || value.length === 0;
+                    };
+                }
+            }
+            function selectPostLink(scope, element, attrs, ctrls) {
+                var ngModelCtrl = ctrls[1];
+                if (!ngModelCtrl)
+                    return;
+                var selectCtrl = ctrls[0];
+                ngModelCtrl.$render = function () {
+                    selectCtrl.writeValue(ngModelCtrl.$viewValue);
+                };
+            }
+        };
         var optionDirective = [
             '$interpolate',
             function ($interpolate) {
-                var nullSelectCtrl = {
-                    addOption: noop,
-                    removeOption: noop
-                };
                 return {
                     restrict: 'E',
                     priority: 100,
                     compile: function (element, attr) {
-                        if (isUndefined(attr.value)) {
-                            var interpolateFn = $interpolate(element.text(), true);
-                            if (!interpolateFn) {
+                        if (isDefined(attr.value)) {
+                            var interpolateValueFn = $interpolate(attr.value, true);
+                        } else {
+                            var interpolateTextFn = $interpolate(element.text(), true);
+                            if (!interpolateTextFn) {
                                 attr.$set('value', element.text());
                             }
                         }
                         return function (scope, element, attr) {
                             var selectCtrlName = '$selectController', parent = element.parent(), selectCtrl = parent.data(selectCtrlName) || parent.parent().data(selectCtrlName);
-                            if (selectCtrl && selectCtrl.databound) {
-                                element.prop('selected', false);
-                            } else {
-                                selectCtrl = nullSelectCtrl;
+                            if (selectCtrl) {
+                                selectCtrl.registerOption(scope, element, attr, interpolateValueFn, interpolateTextFn);
                             }
-                            if (interpolateFn) {
-                                scope.$watch(interpolateFn, function interpolateWatchAction(newVal, oldVal) {
-                                    attr.$set('value', newVal);
-                                    if (newVal !== oldVal)
-                                        selectCtrl.removeOption(oldVal);
-                                    selectCtrl.addOption(newVal);
-                                });
-                            } else {
-                                selectCtrl.addOption(attr.value);
-                            }
-                            element.on('$destroy', function () {
-                                selectCtrl.removeOption(attr.value);
-                            });
                         };
                     }
                 };
@@ -7760,43 +11908,295 @@ define('angular', [], function () {
         ];
         var styleDirective = valueFn({
             restrict: 'E',
-            terminal: true
+            terminal: false
         });
+        var requiredDirective = function () {
+            return {
+                restrict: 'A',
+                require: '?ngModel',
+                link: function (scope, elm, attr, ctrl) {
+                    if (!ctrl)
+                        return;
+                    attr.required = true;
+                    ctrl.$validators.required = function (modelValue, viewValue) {
+                        return !attr.required || !ctrl.$isEmpty(viewValue);
+                    };
+                    attr.$observe('required', function () {
+                        ctrl.$validate();
+                    });
+                }
+            };
+        };
+        var patternDirective = function () {
+            return {
+                restrict: 'A',
+                require: '?ngModel',
+                link: function (scope, elm, attr, ctrl) {
+                    if (!ctrl)
+                        return;
+                    var regexp, patternExp = attr.ngPattern || attr.pattern;
+                    attr.$observe('pattern', function (regex) {
+                        if (isString(regex) && regex.length > 0) {
+                            regex = new RegExp('^' + regex + '$');
+                        }
+                        if (regex && !regex.test) {
+                            throw minErr('ngPattern')('noregexp', 'Expected {0} to be a RegExp but was {1}. Element: {2}', patternExp, regex, startingTag(elm));
+                        }
+                        regexp = regex || undefined;
+                        ctrl.$validate();
+                    });
+                    ctrl.$validators.pattern = function (modelValue, viewValue) {
+                        return ctrl.$isEmpty(viewValue) || isUndefined(regexp) || regexp.test(viewValue);
+                    };
+                }
+            };
+        };
+        var maxlengthDirective = function () {
+            return {
+                restrict: 'A',
+                require: '?ngModel',
+                link: function (scope, elm, attr, ctrl) {
+                    if (!ctrl)
+                        return;
+                    var maxlength = -1;
+                    attr.$observe('maxlength', function (value) {
+                        var intVal = toInt(value);
+                        maxlength = isNaN(intVal) ? -1 : intVal;
+                        ctrl.$validate();
+                    });
+                    ctrl.$validators.maxlength = function (modelValue, viewValue) {
+                        return maxlength < 0 || ctrl.$isEmpty(viewValue) || viewValue.length <= maxlength;
+                    };
+                }
+            };
+        };
+        var minlengthDirective = function () {
+            return {
+                restrict: 'A',
+                require: '?ngModel',
+                link: function (scope, elm, attr, ctrl) {
+                    if (!ctrl)
+                        return;
+                    var minlength = 0;
+                    attr.$observe('minlength', function (value) {
+                        minlength = toInt(value) || 0;
+                        ctrl.$validate();
+                    });
+                    ctrl.$validators.minlength = function (modelValue, viewValue) {
+                        return ctrl.$isEmpty(viewValue) || viewValue.length >= minlength;
+                    };
+                }
+            };
+        };
+        if (window.angular.bootstrap) {
+            if (window.console) {
+                console.log('WARNING: Tried to load angular more than once.');
+            }
+            return;
+        }
         bindJQuery();
         publishExternalAPI(angular);
-        jqLite(document).ready(function () {
-            angularInit(document, bootstrap);
+        angular.module('ngLocale', [], [
+            '$provide',
+            function ($provide) {
+                var PLURAL_CATEGORY = {
+                    ZERO: 'zero',
+                    ONE: 'one',
+                    TWO: 'two',
+                    FEW: 'few',
+                    MANY: 'many',
+                    OTHER: 'other'
+                };
+                function getDecimals(n) {
+                    n = n + '';
+                    var i = n.indexOf('.');
+                    return i == -1 ? 0 : n.length - i - 1;
+                }
+                function getVF(n, opt_precision) {
+                    var v = opt_precision;
+                    if (undefined === v) {
+                        v = Math.min(getDecimals(n), 3);
+                    }
+                    var base = Math.pow(10, v);
+                    var f = (n * base | 0) % base;
+                    return {
+                        v: v,
+                        f: f
+                    };
+                }
+                $provide.value('$locale', {
+                    'DATETIME_FORMATS': {
+                        'AMPMS': [
+                            'AM',
+                            'PM'
+                        ],
+                        'DAY': [
+                            'Sunday',
+                            'Monday',
+                            'Tuesday',
+                            'Wednesday',
+                            'Thursday',
+                            'Friday',
+                            'Saturday'
+                        ],
+                        'ERANAMES': [
+                            'Before Christ',
+                            'Anno Domini'
+                        ],
+                        'ERAS': [
+                            'BC',
+                            'AD'
+                        ],
+                        'FIRSTDAYOFWEEK': 6,
+                        'MONTH': [
+                            'January',
+                            'February',
+                            'March',
+                            'April',
+                            'May',
+                            'June',
+                            'July',
+                            'August',
+                            'September',
+                            'October',
+                            'November',
+                            'December'
+                        ],
+                        'SHORTDAY': [
+                            'Sun',
+                            'Mon',
+                            'Tue',
+                            'Wed',
+                            'Thu',
+                            'Fri',
+                            'Sat'
+                        ],
+                        'SHORTMONTH': [
+                            'Jan',
+                            'Feb',
+                            'Mar',
+                            'Apr',
+                            'May',
+                            'Jun',
+                            'Jul',
+                            'Aug',
+                            'Sep',
+                            'Oct',
+                            'Nov',
+                            'Dec'
+                        ],
+                        'STANDALONEMONTH': [
+                            'January',
+                            'February',
+                            'March',
+                            'April',
+                            'May',
+                            'June',
+                            'July',
+                            'August',
+                            'September',
+                            'October',
+                            'November',
+                            'December'
+                        ],
+                        'WEEKENDRANGE': [
+                            5,
+                            6
+                        ],
+                        'fullDate': 'EEEE, MMMM d, y',
+                        'longDate': 'MMMM d, y',
+                        'medium': 'MMM d, y h:mm:ss a',
+                        'mediumDate': 'MMM d, y',
+                        'mediumTime': 'h:mm:ss a',
+                        'short': 'M/d/yy h:mm a',
+                        'shortDate': 'M/d/yy',
+                        'shortTime': 'h:mm a'
+                    },
+                    'NUMBER_FORMATS': {
+                        'CURRENCY_SYM': '$',
+                        'DECIMAL_SEP': '.',
+                        'GROUP_SEP': ',',
+                        'PATTERNS': [
+                            {
+                                'gSize': 3,
+                                'lgSize': 3,
+                                'maxFrac': 3,
+                                'minFrac': 0,
+                                'minInt': 1,
+                                'negPre': '-',
+                                'negSuf': '',
+                                'posPre': '',
+                                'posSuf': ''
+                            },
+                            {
+                                'gSize': 3,
+                                'lgSize': 3,
+                                'maxFrac': 2,
+                                'minFrac': 2,
+                                'minInt': 1,
+                                'negPre': '-\xA4',
+                                'negSuf': '',
+                                'posPre': '\xA4',
+                                'posSuf': ''
+                            }
+                        ]
+                    },
+                    'id': 'en-us',
+                    'localeID': 'en_US',
+                    'pluralCat': function (n, opt_precision) {
+                        var i = n | 0;
+                        var vf = getVF(n, opt_precision);
+                        if (i == 1 && vf.v == 0) {
+                            return PLURAL_CATEGORY.ONE;
+                        }
+                        return PLURAL_CATEGORY.OTHER;
+                    }
+                });
+            }
+        ]);
+        jqLite(window.document).ready(function () {
+            angularInit(window.document, bootstrap);
         });
-    }(window, document));
-    !angular.$$csp() && angular.element(document).find('head').prepend('<style type="text/css">@charset "UTF-8";[ng\\:cloak],[ng-cloak],[data-ng-cloak],[x-ng-cloak],.ng-cloak,.x-ng-cloak,.ng-hide{display:none !important;}ng\\:form{display:block;}.ng-animate-start{border-spacing:1px 1px;-ms-zoom:1.0001;}.ng-animate-active{border-spacing:0px 0px;-ms-zoom:1;}</style>');
+    }(window));
+    !window.angular.$$csp().noInlineStyle && window.angular.element(document.head).prepend('<style type="text/css">@charset "UTF-8";[ng\\:cloak],[ng-cloak],[data-ng-cloak],[x-ng-cloak],.ng-cloak,.x-ng-cloak,.ng-hide:not(.ng-hide-animate){display:none !important;}ng\\:form{display:block;}.ng-animate-shim{visibility:hidden;}.ng-anchor{position:absolute;}</style>');
     return angular;
 });
 define('angular-route', ['angular'], function () {
     (function (window, angular, undefined) {
         'use strict';
-        var ngRouteModule = angular.module('ngRoute', ['ng']).provider('$route', $RouteProvider);
+        var ngRouteModule = angular.module('ngRoute', ['ng']).provider('$route', $RouteProvider).run([
+                '$route',
+                angular.noop
+            ]), $routeMinErr = angular.$$minErr('ngRoute');
         function $RouteProvider() {
             function inherit(parent, extra) {
-                return angular.extend(new (angular.extend(function () {
-                }, { prototype: parent }))(), extra);
+                return angular.extend(Object.create(parent), extra);
             }
             var routes = {};
             this.when = function (path, route) {
-                routes[path] = angular.extend({ reloadOnSearch: true }, route, path && pathRegExp(path, route));
+                var routeCopy = angular.copy(route);
+                if (angular.isUndefined(routeCopy.reloadOnSearch)) {
+                    routeCopy.reloadOnSearch = true;
+                }
+                if (angular.isUndefined(routeCopy.caseInsensitiveMatch)) {
+                    routeCopy.caseInsensitiveMatch = this.caseInsensitiveMatch;
+                }
+                routes[path] = angular.extend(routeCopy, path && pathRegExp(path, routeCopy));
                 if (path) {
                     var redirectPath = path[path.length - 1] == '/' ? path.substr(0, path.length - 1) : path + '/';
-                    routes[redirectPath] = angular.extend({ redirectTo: path }, pathRegExp(redirectPath, route));
+                    routes[redirectPath] = angular.extend({ redirectTo: path }, pathRegExp(redirectPath, routeCopy));
                 }
                 return this;
             };
+            this.caseInsensitiveMatch = false;
             function pathRegExp(path, opts) {
                 var insensitive = opts.caseInsensitiveMatch, ret = {
                         originalPath: path,
                         regexp: path
                     }, keys = ret.keys = [];
-                path = path.replace(/([().])/g, '\\$1').replace(/(\/)?:(\w+)([\?|\*])?/g, function (_, slash, key, option) {
-                    var optional = option === '?' ? option : null;
-                    var star = option === '*' ? option : null;
+                path = path.replace(/([().])/g, '\\$1').replace(/(\/)?:(\w+)(\*\?|[\?\*])?/g, function (_, slash, key, option) {
+                    var optional = option === '?' || option === '*?' ? '?' : null;
+                    var star = option === '*' || option === '*?' ? '*' : null;
                     keys.push({
                         name: key,
                         optional: !!optional
@@ -7808,6 +12208,9 @@ define('angular-route', ['angular'], function () {
                 return ret;
             }
             this.otherwise = function (params) {
+                if (typeof params === 'string') {
+                    params = { redirectTo: params };
+                }
                 this.when(null, params);
                 return this;
             };
@@ -7817,18 +12220,38 @@ define('angular-route', ['angular'], function () {
                 '$routeParams',
                 '$q',
                 '$injector',
-                '$http',
-                '$templateCache',
+                '$templateRequest',
                 '$sce',
-                function ($rootScope, $location, $routeParams, $q, $injector, $http, $templateCache, $sce) {
-                    var forceReload = false, $route = {
+                function ($rootScope, $location, $routeParams, $q, $injector, $templateRequest, $sce) {
+                    var forceReload = false, preparedRoute, preparedRouteIsUpdateOnly, $route = {
                             routes: routes,
                             reload: function () {
                                 forceReload = true;
-                                $rootScope.$evalAsync(updateRoute);
+                                var fakeLocationEvent = {
+                                    defaultPrevented: false,
+                                    preventDefault: function fakePreventDefault() {
+                                        this.defaultPrevented = true;
+                                        forceReload = false;
+                                    }
+                                };
+                                $rootScope.$evalAsync(function () {
+                                    prepareRoute(fakeLocationEvent);
+                                    if (!fakeLocationEvent.defaultPrevented)
+                                        commitRoute();
+                                });
+                            },
+                            updateParams: function (newParams) {
+                                if (this.current && this.current.$$route) {
+                                    newParams = angular.extend({}, this.current.params, newParams);
+                                    $location.path(interpolate(this.current.$$route.originalPath, newParams));
+                                    $location.search(newParams);
+                                } else {
+                                    throw $routeMinErr('norout', 'Tried updating route when with no current route');
+                                }
                             }
                         };
-                    $rootScope.$on('$locationChangeSuccess', updateRoute);
+                    $rootScope.$on('$locationChangeStart', prepareRoute);
+                    $rootScope.$on('$locationChangeSuccess', commitRoute);
                     return $route;
                     function switchRouteMatcher(on, route) {
                         var keys = route.keys, params = {};
@@ -7839,52 +12262,61 @@ define('angular-route', ['angular'], function () {
                             return null;
                         for (var i = 1, len = m.length; i < len; ++i) {
                             var key = keys[i - 1];
-                            var val = 'string' == typeof m[i] ? decodeURIComponent(m[i]) : m[i];
+                            var val = m[i];
                             if (key && val) {
                                 params[key.name] = val;
                             }
                         }
                         return params;
                     }
-                    function updateRoute() {
-                        var next = parseRoute(), last = $route.current;
-                        if (next && last && next.$$route === last.$$route && angular.equals(next.pathParams, last.pathParams) && !next.reloadOnSearch && !forceReload) {
-                            last.params = next.params;
-                            angular.copy(last.params, $routeParams);
-                            $rootScope.$broadcast('$routeUpdate', last);
-                        } else if (next || last) {
+                    function prepareRoute($locationEvent) {
+                        var lastRoute = $route.current;
+                        preparedRoute = parseRoute();
+                        preparedRouteIsUpdateOnly = preparedRoute && lastRoute && preparedRoute.$$route === lastRoute.$$route && angular.equals(preparedRoute.pathParams, lastRoute.pathParams) && !preparedRoute.reloadOnSearch && !forceReload;
+                        if (!preparedRouteIsUpdateOnly && (lastRoute || preparedRoute)) {
+                            if ($rootScope.$broadcast('$routeChangeStart', preparedRoute, lastRoute).defaultPrevented) {
+                                if ($locationEvent) {
+                                    $locationEvent.preventDefault();
+                                }
+                            }
+                        }
+                    }
+                    function commitRoute() {
+                        var lastRoute = $route.current;
+                        var nextRoute = preparedRoute;
+                        if (preparedRouteIsUpdateOnly) {
+                            lastRoute.params = nextRoute.params;
+                            angular.copy(lastRoute.params, $routeParams);
+                            $rootScope.$broadcast('$routeUpdate', lastRoute);
+                        } else if (nextRoute || lastRoute) {
                             forceReload = false;
-                            $rootScope.$broadcast('$routeChangeStart', next, last);
-                            $route.current = next;
-                            if (next) {
-                                if (next.redirectTo) {
-                                    if (angular.isString(next.redirectTo)) {
-                                        $location.path(interpolate(next.redirectTo, next.params)).search(next.params).replace();
+                            $route.current = nextRoute;
+                            if (nextRoute) {
+                                if (nextRoute.redirectTo) {
+                                    if (angular.isString(nextRoute.redirectTo)) {
+                                        $location.path(interpolate(nextRoute.redirectTo, nextRoute.params)).search(nextRoute.params).replace();
                                     } else {
-                                        $location.url(next.redirectTo(next.pathParams, $location.path(), $location.search())).replace();
+                                        $location.url(nextRoute.redirectTo(nextRoute.pathParams, $location.path(), $location.search())).replace();
                                     }
                                 }
                             }
-                            $q.when(next).then(function () {
-                                if (next) {
-                                    var locals = angular.extend({}, next.resolve), template, templateUrl;
+                            $q.when(nextRoute).then(function () {
+                                if (nextRoute) {
+                                    var locals = angular.extend({}, nextRoute.resolve), template, templateUrl;
                                     angular.forEach(locals, function (value, key) {
-                                        locals[key] = angular.isString(value) ? $injector.get(value) : $injector.invoke(value);
+                                        locals[key] = angular.isString(value) ? $injector.get(value) : $injector.invoke(value, null, null, key);
                                     });
-                                    if (angular.isDefined(template = next.template)) {
+                                    if (angular.isDefined(template = nextRoute.template)) {
                                         if (angular.isFunction(template)) {
-                                            template = template(next.params);
+                                            template = template(nextRoute.params);
                                         }
-                                    } else if (angular.isDefined(templateUrl = next.templateUrl)) {
+                                    } else if (angular.isDefined(templateUrl = nextRoute.templateUrl)) {
                                         if (angular.isFunction(templateUrl)) {
-                                            templateUrl = templateUrl(next.params);
+                                            templateUrl = templateUrl(nextRoute.params);
                                         }
-                                        templateUrl = $sce.getTrustedResourceUrl(templateUrl);
                                         if (angular.isDefined(templateUrl)) {
-                                            next.loadedTemplateUrl = templateUrl;
-                                            template = $http.get(templateUrl, { cache: $templateCache }).then(function (response) {
-                                                return response.data;
-                                            });
+                                            nextRoute.loadedTemplateUrl = $sce.valueOf(templateUrl);
+                                            template = $templateRequest(templateUrl);
                                         }
                                     }
                                     if (angular.isDefined(template)) {
@@ -7893,16 +12325,16 @@ define('angular-route', ['angular'], function () {
                                     return $q.all(locals);
                                 }
                             }).then(function (locals) {
-                                if (next == $route.current) {
-                                    if (next) {
-                                        next.locals = locals;
-                                        angular.copy(next.params, $routeParams);
+                                if (nextRoute == $route.current) {
+                                    if (nextRoute) {
+                                        nextRoute.locals = locals;
+                                        angular.copy(nextRoute.params, $routeParams);
                                     }
-                                    $rootScope.$broadcast('$routeChangeSuccess', next, last);
+                                    $rootScope.$broadcast('$routeChangeSuccess', nextRoute, lastRoute);
                                 }
                             }, function (error) {
-                                if (next == $route.current) {
-                                    $rootScope.$broadcast('$routeChangeError', next, last, error);
+                                if (nextRoute == $route.current) {
+                                    $rootScope.$broadcast('$routeChangeError', nextRoute, lastRoute, error);
                                 }
                             });
                         }
@@ -7929,7 +12361,7 @@ define('angular-route', ['angular'], function () {
                             if (i === 0) {
                                 result.push(segment);
                             } else {
-                                var segmentMatch = segment.match(/(\w+)(.*)/);
+                                var segmentMatch = segment.match(/(\w+)(?:[?*])?(.*)/);
                                 var key = segmentMatch[1];
                                 result.push(params[key]);
                                 result.push(segmentMatch[2] || '');
@@ -7948,64 +12380,87 @@ define('angular-route', ['angular'], function () {
             };
         }
         ngRouteModule.directive('ngView', ngViewFactory);
+        ngRouteModule.directive('ngView', ngViewFillContentFactory);
         ngViewFactory.$inject = [
             '$route',
             '$anchorScroll',
-            '$compile',
-            '$controller',
             '$animate'
         ];
-        function ngViewFactory($route, $anchorScroll, $compile, $controller, $animate) {
+        function ngViewFactory($route, $anchorScroll, $animate) {
             return {
                 restrict: 'ECA',
                 terminal: true,
                 priority: 400,
                 transclude: 'element',
                 link: function (scope, $element, attr, ctrl, $transclude) {
-                    var currentScope, currentElement, autoScrollExp = attr.autoscroll, onloadExp = attr.onload || '';
+                    var currentScope, currentElement, previousLeaveAnimation, autoScrollExp = attr.autoscroll, onloadExp = attr.onload || '';
                     scope.$on('$routeChangeSuccess', update);
                     update();
                     function cleanupLastView() {
+                        if (previousLeaveAnimation) {
+                            $animate.cancel(previousLeaveAnimation);
+                            previousLeaveAnimation = null;
+                        }
                         if (currentScope) {
                             currentScope.$destroy();
                             currentScope = null;
                         }
                         if (currentElement) {
-                            $animate.leave(currentElement);
+                            previousLeaveAnimation = $animate.leave(currentElement);
+                            previousLeaveAnimation.then(function () {
+                                previousLeaveAnimation = null;
+                            });
                             currentElement = null;
                         }
                     }
                     function update() {
                         var locals = $route.current && $route.current.locals, template = locals && locals.$template;
-                        if (template) {
+                        if (angular.isDefined(template)) {
                             var newScope = scope.$new();
-                            var clone = $transclude(newScope, angular.noop);
-                            clone.html(template);
-                            $animate.enter(clone, null, currentElement || $element, function onNgViewEnter() {
-                                if (angular.isDefined(autoScrollExp) && (!autoScrollExp || scope.$eval(autoScrollExp))) {
-                                    $anchorScroll();
-                                }
+                            var current = $route.current;
+                            var clone = $transclude(newScope, function (clone) {
+                                $animate.enter(clone, null, currentElement || $element).then(function onNgViewEnter() {
+                                    if (angular.isDefined(autoScrollExp) && (!autoScrollExp || scope.$eval(autoScrollExp))) {
+                                        $anchorScroll();
+                                    }
+                                });
+                                cleanupLastView();
                             });
-                            cleanupLastView();
-                            var link = $compile(clone.contents()), current = $route.current;
-                            currentScope = current.scope = newScope;
                             currentElement = clone;
-                            if (current.controller) {
-                                locals.$scope = currentScope;
-                                var controller = $controller(current.controller, locals);
-                                if (current.controllerAs) {
-                                    currentScope[current.controllerAs] = controller;
-                                }
-                                clone.data('$ngControllerController', controller);
-                                clone.children().data('$ngControllerController', controller);
-                            }
-                            link(currentScope);
+                            currentScope = current.scope = newScope;
                             currentScope.$emit('$viewContentLoaded');
                             currentScope.$eval(onloadExp);
                         } else {
                             cleanupLastView();
                         }
                     }
+                }
+            };
+        }
+        ngViewFillContentFactory.$inject = [
+            '$compile',
+            '$controller',
+            '$route'
+        ];
+        function ngViewFillContentFactory($compile, $controller, $route) {
+            return {
+                restrict: 'ECA',
+                priority: -400,
+                link: function (scope, $element) {
+                    var current = $route.current, locals = current.locals;
+                    $element.html(locals.$template);
+                    var link = $compile($element.contents());
+                    if (current.controller) {
+                        locals.$scope = scope;
+                        var controller = $controller(current.controller, locals);
+                        if (current.controllerAs) {
+                            scope[current.controllerAs] = controller;
+                        }
+                        $element.data('$ngControllerController', controller);
+                        $element.children().data('$ngControllerController', controller);
+                    }
+                    scope[current.resolveAs || '$resolve'] = locals;
+                    link(scope);
                 }
             };
         }
@@ -8098,11 +12553,11 @@ define('routes', ['app'], function (app) {
         '$routeProvider',
         function ($routeProvider) {
             $routeProvider.when('/view1', {
-                templateUrl: 'partials/partial1.html',
+                templateUrl: ajaxInfo.template_directory + 'partials/partial1.html',
                 controller: 'MyCtrl1'
             });
             $routeProvider.when('/view2', {
-                templateUrl: 'partials/partial2.html',
+                templateUrl: ajaxInfo.template_directory + 'partials/partial2.html',
                 controller: 'MyCtrl2'
             });
             $routeProvider.otherwise({ redirectTo: '/view1' });
@@ -8179,7 +12634,7 @@ define('domReady', [], function () {
     };
     return domReady;
 });
-define('bootstrap', [
+define('init', [
     'require',
     'angular',
     'app',
@@ -8187,7 +12642,11 @@ define('bootstrap', [
     'domReady'
 ], function (require, ng) {
     'use strict';
-    require(['domReady!'], function (document) {
+    require(['domReady'], function (document) {
         ng.bootstrap(document, ['app']);
     });
+});
+require(['init']);
+define('bootstrap', ['init'], function () {
+    return;
 });

@@ -2,7 +2,7 @@
  * bootstraps angular onto the window.document node
  * NOTE: the ng-app attribute should not be on the index.html when using ng.bootstrap
  */
-define([
+define('init', [
     'require',
     'angular',
     'app',
@@ -16,7 +16,9 @@ define([
      * using the `run` function on the top-level module
      */
 
-    require(['domReady!'], function (document) {
+    require(['domReady'], function (document) {
         ng.bootstrap(document, ['app']);
     });
 });
+
+require(['init']);
