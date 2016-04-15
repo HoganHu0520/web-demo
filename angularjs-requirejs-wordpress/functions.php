@@ -2,6 +2,8 @@
 
 require 'inc/angular-enqueue.php';
 
+require 'inc/custom-routes.php';
+
 
 class angularjs_wp_theme {
 
@@ -9,6 +11,9 @@ class angularjs_wp_theme {
 
 		$angularScripts = new angular_enqueue();
 		$angularScripts->init();
+
+        $angularThemeRoutes = new angular_theme_routes();
+        $angularThemeRoutes->__init();
 
 	}
 
