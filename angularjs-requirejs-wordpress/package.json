@@ -6,7 +6,8 @@
   "scripts": {
     "build": "rimraf dist && webpack --config webpack.config.js --progress --profile --bail",
     "server": "webpack-dev-server --history-api-fallback --inline --content-base ./",
-    "start": "npm run server"
+    "start": "npm run server",
+    "lint:js": "node node_modules/eslint/bin/eslint.js -c .eslintrc.json ./assets/**/*.js"
   },
   "dependencies": {
     "angular": "^1.5.9",
@@ -18,6 +19,11 @@
     "babel-loader": "^6.2.8",
     "babel-preset-es2015": "^6.18.0",
     "css-loader": "^0.26.0",
+    "eslint": "^3.11.1",
+    "eslint-config-airbnb-base": "^10.0.1",
+    "eslint-plugin-import": "^2.2.0",
+    "eslint-plugin-jsx-a11y": "^3.0.1",
+    "eslint-plugin-react": "^6.7.1",
     "html-loader": "^0.4.4",
     "less": "^2.7.1",
     "less-loader": "^2.2.3",

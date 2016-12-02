@@ -1,3 +1,3 @@
 import controllers from './module';
 
-export default controllers.controller('MyCtrl2', [function ($scope) {}]);
+export default controllers.controller('MyCtrl2', [() => {}]);

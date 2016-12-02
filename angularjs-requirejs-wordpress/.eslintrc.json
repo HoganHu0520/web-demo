@@ -1,0 +1,16 @@
+{
+    "extends": "airbnb-base",
+    "plugins": [
+        "react",
+        "jsx-a11y",
+        "import"
+    ],
+    "rules": {
+      "no-param-reassign": ["error", { "props": false }],
+      "arrow-body-style": ["error", "always"]
+    },
+    "globals": {
+        "ajaxInfo": true,
+        "document": true
+    }
+}

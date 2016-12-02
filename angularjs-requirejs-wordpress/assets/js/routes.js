@@ -7,20 +7,18 @@ import { app } from './app';
 import partial1 from '../tpl/partial1.html';
 import partial2 from '../tpl/partial2.html';
 
-const ajaxInfo = {};
+export default app.config(['$routeProvider', ($routeProvider) => {
+  $routeProvider.when('/view1', {
+    template: partial1,
+    controller: 'MyCtrl1',
+  });
 
-export default app.config(['$routeProvider', function ($routeProvider) {
-    $routeProvider.when('/view1', {
-        template: partial1,
-        controller: 'MyCtrl1'
-    });
+  $routeProvider.when('/view2', {
+    template: partial2,
+    controller: 'MyCtrl2',
+  });
 
-    $routeProvider.when('/view2', {
-        template: partial2,
-        controller: 'MyCtrl2'
-    });
-
-    $routeProvider.otherwise({
-        redirectTo: '/view1'
-    });
+  $routeProvider.otherwise({
+    redirectTo: '/view1',
+  });
 }]);

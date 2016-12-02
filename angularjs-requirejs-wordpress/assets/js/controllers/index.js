@@ -5,5 +5,4 @@
  * which avails each controller of, for example, the `config` constants object.
  **/
 import './my-ctrl-1';
-
 import './my-ctrl-2';

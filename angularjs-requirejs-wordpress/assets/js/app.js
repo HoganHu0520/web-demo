@@ -9,12 +9,12 @@ import './directives/index';
 import './filters/index';
 import './services/index';
 
-export const app = ng.module('app',[
+export const app = ng.module('app', [
   'app.controllers',
   'app.directives',
   'app.filters',
   'app.services',
-  'ngRoute'
+  'ngRoute',
 ]);
 
 export const angular = ng;
