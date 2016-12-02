@@ -11,11 +11,9 @@ class angular_enqueue {
 
 	function angular_scripts() {
 
-		wp_enqueue_script( 'require', get_template_directory_uri().'/lib/requirejs/require.js', array( 'jquery' ), null, false );
+		wp_enqueue_script( 'app', get_template_directory_uri().'/dist/bundle.js', null, null, false );
 
-		wp_enqueue_script( 'app', get_template_directory_uri().'/build/js/scripts.js', array( 'require' ), null, false );
-
-		wp_localize_script( 'require', 'ajaxInfo',
+		wp_localize_script( 'app', 'ajaxInfo',
 			array(
 
 				'api_url'			 => rest_get_url_prefix() . '/wp/v2/',
@@ -29,8 +27,6 @@ class angular_enqueue {
 	}
 
 	function angular_styles() {
-
-		wp_enqueue_style( 'angularStyles', get_template_directory_uri().'/build/css/app.css', array(), null, 'all' );
 
 	}
 

@@ -2,21 +2,19 @@
  * loads sub modules and wraps them up into the main module
  * this should be used for top-level module definitions only
  */
-define([
-    'angular',
-    'angular-route',
-    './controllers/index',
-    './directives/index',
-    './filters/index',
-    './services/index'
-], function (angular) {
-    'use strict';
+import ng from 'angular';
+import 'angular-route';
+import './controllers/index';
+import './directives/index';
+import './filters/index';
+import './services/index';
 
-    return angular.module('app', [
-        'app.controllers',
-        'app.directives',
-        'app.filters',
-        'app.services',
-        'ngRoute'
-    ]);
-});
+export const app = ng.module('app',[
+  'app.controllers',
+  'app.directives',
+  'app.filters',
+  'app.services',
+  'ngRoute'
+]);
+
+export const angular = ng;

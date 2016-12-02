@@ -1,4 +1,3 @@
-define(['./module'], function (controllers) {
-    'use strict';
-    controllers.controller('MyCtrl2', [function ($scope) {}]);
-});
+import controllers from './module';
+
+export default controllers.controller('MyCtrl2', [function ($scope) {}]);

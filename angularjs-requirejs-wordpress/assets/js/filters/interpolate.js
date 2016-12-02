@@ -1,9 +1,7 @@
-define(['./module'], function (filters) {
-    'use strict';
+import filters from './module';
 
-    return filters.filter('interpolate', ['version', function (version) {
-        return function (text) {
-            return String(text).replace(/\%VERSION\%/mg, version);
-        }
-    }]);
-});
+export default filters.filter('interpolate', ['version', function (version) {
+    return function (text) {
+        return String(text).replace(/\%VERSION\%/mg, version);
+    }
+}]);

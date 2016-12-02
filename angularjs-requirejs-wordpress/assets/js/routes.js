@@ -3,21 +3,24 @@
  * The routes you see here will be anchors '#/' unless specifically configured otherwise.
  */
 
-define(['./app'], function (app) {
-    'use strict';
-    return app.config(['$routeProvider', function ($routeProvider) {
-        $routeProvider.when('/view1', {
-            templateUrl: ajaxInfo.template_directory + 'build/tpl/partial1.html',
-            controller: 'MyCtrl1'
-        });
+import { app } from './app';
+import partial1 from '../tpl/partial1.html';
+import partial2 from '../tpl/partial2.html';
 
-        $routeProvider.when('/view2', {
-            templateUrl: ajaxInfo.template_directory + 'build/tpl/partial2.html',
-            controller: 'MyCtrl2'
-        });
+const ajaxInfo = {};
 
-        $routeProvider.otherwise({
-            redirectTo: '/view1'
-        });
-    }]);
-});
+export default app.config(['$routeProvider', function ($routeProvider) {
+    $routeProvider.when('/view1', {
+        template: partial1,
+        controller: 'MyCtrl1'
+    });
+
+    $routeProvider.when('/view2', {
+        template: partial2,
+        controller: 'MyCtrl2'
+    });
+
+    $routeProvider.otherwise({
+        redirectTo: '/view1'
+    });
+}]);

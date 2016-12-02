@@ -1,18 +1,2 @@
-/*
-Theme Name: AngularJS-RequireJS-Wordpress
-Theme URI: http://www.roysivan.com/angular-wordpress-theme
-Description: Bringing AngularJS technology to WordPress. This theme is built to help build a Single Page Application using WordPress, RequireJS and AngularJS.
-Tags: WordPress, AngularJS, JavaScript, RESTful, API, Angular, Client Side Application, Single Page Application, RequireJS
-
-*/
-
-/* HTML 5*/
-header, article, footer, section, nav{
-	display:block;
-}
-.clear{
-	clear:both;
-}
-
-
-/******** ALL FURTHER STYLING SHOULD BE DONE IN THE more-style.less/css FILES *******/
+/* style.css */
+body { background: yellow; }
