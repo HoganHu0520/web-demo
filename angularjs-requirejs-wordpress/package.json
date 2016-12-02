@@ -23,7 +23,8 @@
     "less-loader": "^2.2.3",
     "rimraf": "^2.5.4",
     "style-loader": "^0.13.1",
-    "webpack": "^1.13.3"
+    "webpack": "^1.13.3",
+    "webpack-dev-server": "^1.16.2"
   },
   "author": "",
   "license": "ISC"
